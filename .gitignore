@@ -1,0 +1,102 @@
+# Byte-compiled / optimized / distributed files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Home Assistant specific
+# Local Home Assistant config and testing
+config/
+home-assistant.log
+home-assistant_v2.db
+home-assistant_v2.db-wal
+home-assistant_v2.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Debug logs
+*.log
+debug.log
+
+# Secrets and credentials
+secrets.yaml
+*.secret
+.env
+.env.local
+
+# Build artifacts
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# PEP 582
+__pypackages__/
+
+# Pyright
+.pyright_cache/
+
+# Ruff
+.ruff_cache/
+
+# Hatch
+.hatch/
+
+# uv
+uv.lock

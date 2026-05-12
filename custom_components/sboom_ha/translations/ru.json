@@ -1,0 +1,98 @@
+{
+  "config": {
+    "flow_title": "{name} ({host})",
+    "step": {
+      "user": {
+        "title": "SberBoom — IP-адрес колонки",
+        "description": "Введите локальный IP-адрес колонки SberBoom.",
+        "data": {
+          "host": "IP-адрес",
+          "port": "Порт",
+          "client_name": "Имя клиента (будет видно в личном кабинете Sber)"
+        }
+      },
+      "discovery_confirm": {
+        "title": "Найдена колонка {name}",
+        "description": "В локальной сети обнаружена колонка SberBoom:\n- Имя: {name}\n- IP: {host}\n- Модель: {model}\n\nНажмите Submit для начала привязки.",
+        "data": {
+          "client_name": "Имя клиента (будет видно в личном кабинете Sber)"
+        }
+      },
+      "pair": {
+        "title": "Подтверждение привязки",
+        "description": "Колонка {name} ({host}) ждёт подтверждения.\n\n**Нажмите кнопку \"+\" на корпусе колонки**, затем нажмите Submit.\n\n(Таймаут: {timeout} сек)"
+      },
+      "reconfigure": {
+        "title": "Изменить адрес колонки {name}",
+        "description": "Изменить IP/порт уже привязанной колонки. PIN-токен сохраняется.",
+        "data": {
+          "host": "IP-адрес",
+          "port": "Порт"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться. Проверьте IP/порт и доступность колонки в локальной сети.",
+      "pair_timeout": "Кнопка \"+\" не была нажата вовремя. Попробуйте ещё раз."
+    },
+    "abort": {
+      "already_configured": "Эта колонка уже добавлена.",
+      "incomplete_discovery": "Обнаруженный сервис не содержит ID устройства."
+    }
+  },
+  "issues": {
+    "speaker_unreachable": {
+      "title": "Колонка {name} недоступна",
+      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — перенастройте через Settings → Integrations → SBoom → ⋮ → Reconfigure."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки SBoom",
+        "description": "Тонкие параметры опроса и фич. Изменения применяются сразу — интеграция перезагрузится автоматически.",
+        "data": {
+          "volume_poll_interval": "Интервал опроса громкости, сек",
+          "keepalive_interval": "Интервал WebSocket keepalive, сек",
+          "availability_threshold": "Порог недоступности (неудачных reconnect'ов)",
+          "lyrics_enabled": "Загружать synced lyrics с Lrclib.net"
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "next_track":      { "name": "Следующий трек" },
+      "previous_track":  { "name": "Предыдущий трек" },
+      "play_pause":      { "name": "Воспроизведение / Пауза" },
+      "like":            { "name": "Лайк текущему треку" },
+      "dislike":         { "name": "Дизлайк текущему треку" },
+      "remove_like":     { "name": "Убрать лайк" },
+      "remove_dislike":  { "name": "Убрать дизлайк" }
+    },
+    "number": {
+      "volume": { "name": "Громкость" }
+    },
+    "switch": {
+      "shuffle": { "name": "Перемешивание" },
+      "mute":    { "name": "Без звука" }
+    },
+    "select": {
+      "repeat": {
+        "name": "Режим повтора",
+        "state": {
+          "off":       "Выкл.",
+          "playlist":  "Плейлист",
+          "track":     "Трек"
+        }
+      }
+    },
+    "sensor": {
+      "lyrics_current_line": { "name": "Текущая строка lyrics" },
+      "lyrics":               { "name": "Lyrics" }
+    },
+    "camera": {
+      "lyrics_camera": { "name": "Lyrics на ТВ" }
+    }
+  }
+}

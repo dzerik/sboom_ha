@@ -1,0 +1,192 @@
+"""HA media_player entity для SberBoom-колонки."""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+
+from homeassistant.components.media_player import (
+    MediaPlayerEntity,
+    MediaPlayerEntityFeature,
+    MediaPlayerState,
+    MediaType,
+    RepeatMode,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from ._entity_base import SboomEntity
+from .const import DOMAIN
+from .coordinator import SboomCoordinator
+from .helpers import cover_url
+
+_LOGGER = logging.getLogger(__name__)
+
+SUPPORTED = (
+    MediaPlayerEntityFeature.VOLUME_SET
+    | MediaPlayerEntityFeature.VOLUME_STEP
+    | MediaPlayerEntityFeature.VOLUME_MUTE
+    | MediaPlayerEntityFeature.PLAY
+    | MediaPlayerEntityFeature.PAUSE
+    | MediaPlayerEntityFeature.NEXT_TRACK
+    | MediaPlayerEntityFeature.PREVIOUS_TRACK
+    | MediaPlayerEntityFeature.SEEK
+    | MediaPlayerEntityFeature.SHUFFLE_SET
+    | MediaPlayerEntityFeature.REPEAT_SET
+)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    coordinator: SboomCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([SboomMediaPlayer(coordinator, entry)])
+
+
+class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
+    _attr_name = None  # = device name (через has_entity_name из SboomEntity)
+    _attr_supported_features = SUPPORTED
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = self._device_unique_prefix
+
+    # ─────────────────── state derivation ───────────────────
+
+    @property
+    def state(self) -> MediaPlayerState | None:
+        track = self.coordinator.track
+        if track is None:
+            return MediaPlayerState.IDLE
+        return MediaPlayerState.PLAYING if track.playing else MediaPlayerState.PAUSED
+
+    @property
+    def volume_level(self) -> float | None:
+        st = self.coordinator.state
+        if not st:
+            return None
+        return st.volume_percent / 100.0
+
+    @property
+    def is_volume_muted(self) -> bool | None:
+        st = self.coordinator.state
+        return st.muted if st else None
+
+    @property
+    def media_title(self) -> str | None:
+        return self.coordinator.track.title if self.coordinator.track else None
+
+    @property
+    def media_artist(self) -> str | None:
+        if not self.coordinator.track:
+            return None
+        return ", ".join(self.coordinator.track.artists) or None
+
+    @property
+    def media_album_name(self) -> str | None:
+        return self.coordinator.track.album if self.coordinator.track else None
+
+    @property
+    def media_content_id(self) -> str | None:
+        return self.coordinator.track.track_id if self.coordinator.track else None
+
+    @property
+    def media_content_type(self) -> str | None:
+        # Без этого HA в more-info не выводит media_artist и фолбэкает на app_name.
+        return MediaType.MUSIC if self.coordinator.track else None
+
+    @property
+    def media_duration(self) -> int | None:
+        return self.coordinator.track.duration_sec if self.coordinator.track else None
+
+    @property
+    def media_position(self) -> int | None:
+        return self.coordinator.track.position_sec if self.coordinator.track else None
+
+    @property
+    def media_position_updated_at(self) -> datetime | None:
+        """Когда позиция была зафиксирована (UTC). HA сам инкрементит её со временем."""
+        track = self.coordinator.track
+        if not track or track.position_ts_ms is None:
+            return None
+        return datetime.fromtimestamp(track.position_ts_ms / 1000, tz=timezone.utc)
+
+    @property
+    def app_name(self) -> str | None:
+        if not self.coordinator.track or not self.coordinator.track.provider:
+            return None
+        # делаем человекочитаемые названия для известных провайдеров
+        return {
+            "zvuk":     "Sber Звук",
+            "salute":   "Салют",
+            "youtube":  "YouTube",
+            "spotify":  "Spotify",
+        }.get(self.coordinator.track.provider, self.coordinator.track.provider)
+
+    @property
+    def shuffle(self) -> bool | None:
+        return self.coordinator.track.shuffle if self.coordinator.track else None
+
+    @property
+    def repeat(self) -> RepeatMode | None:
+        if not self.coordinator.track or not self.coordinator.track.repeat:
+            return None
+        return {
+            "none":     RepeatMode.OFF,
+            "playlist": RepeatMode.ALL,
+            "all":      RepeatMode.ALL,
+            "track":    RepeatMode.ONE,
+            "one":      RepeatMode.ONE,
+        }.get(self.coordinator.track.repeat.lower(), RepeatMode.OFF)
+
+    @property
+    def media_image_url(self) -> str | None:
+        return cover_url(self.coordinator.track) if self.coordinator.track else None
+
+    @property
+    def media_image_remotely_accessible(self) -> bool:
+        """Cover URLs are public CDN — let HA hand them to clients directly."""
+        return True
+
+    # ─────────────────── commands ───────────────────
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        await self.coordinator.client.set_volume(int(volume * 100))
+        await self.coordinator.async_request_refresh()
+
+    async def async_volume_up(self) -> None:
+        cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
+        await self.coordinator.client.set_volume(min(100, cur + 5))
+
+    async def async_volume_down(self) -> None:
+        cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
+        await self.coordinator.client.set_volume(max(0, cur - 5))
+
+    async def async_media_play(self) -> None:
+        await self.coordinator.client.media_play()
+
+    async def async_media_pause(self) -> None:
+        await self.coordinator.client.media_pause()
+
+    async def async_media_next_track(self) -> None:
+        await self.coordinator.client.media_next()
+
+    async def async_media_previous_track(self) -> None:
+        await self.coordinator.client.media_prev()
+
+    async def async_media_seek(self, position: float) -> None:
+        await self.coordinator.client.seek_to(int(position))
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        if mute:
+            await self.coordinator.client.media_mute()
+        else:
+            await self.coordinator.client.media_unmute()
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        await self.coordinator.client.media_shuffle(shuffle)
+
+    async def async_set_repeat(self, repeat: str) -> None:
+        await self.coordinator.client.media_repeat(repeat)

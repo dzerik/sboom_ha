@@ -1,0 +1,2 @@
+websockets>=13.0
+voluptuous>=0.13

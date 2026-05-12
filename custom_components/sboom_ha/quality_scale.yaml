@@ -1,0 +1,86 @@
+# HA Integration Quality Scale checklist.
+# https://developers.home-assistant.io/docs/core/integration-quality-scale/
+#
+# Custom integrations не публикуются в core — этот файл служит планом
+# движения по уровням Bronze → Silver → Gold → Platinum.
+
+rules:
+  # ───── Bronze ─────
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage:
+    status: todo
+    comment: Тесты config_flow ещё не покрывают reauth/reconfigure end-to-end.
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions:
+    status: todo
+    comment: Добавить раздел "Удаление" в README.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data:
+    status: todo
+    comment: Сейчас используем hass.data[DOMAIN][entry_id]; план миграции на entry.runtime_data.
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # ───── Silver ─────
+  action-exceptions:
+    status: todo
+    comment: Добавить вызов HomeAssistantError из медиа-команд при WS-ошибках.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates:
+    status: todo
+    comment: Объявить PARALLEL_UPDATES = 0 на платформах для явности.
+  reauthentication-flow: done
+  test-coverage: done
+
+  # ───── Gold ─────
+  devices: done
+  diagnostics: done
+  discovery-update-info: done
+  discovery: done
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: Single-device интеграция; колонка одна на entry.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations:
+    status: todo
+    comment: Перевести строки исключений (cannot_connect, pair_timeout) в exception keys.
+  icon-translations:
+    status: todo
+    comment: Использовать icons.json для динамических иконок.
+  reconfiguration-flow: done
+  repair-issues: done
+  stale-devices:
+    status: exempt
+    comment: Single-device — нечему "застывать".
+
+  # ───── Platinum ─────
+  async-dependency: done  # websockets уже async
+  inject-websession: done  # async_get_clientsession в coordinator
+  strict-typing:
+    status: todo
+    comment: Прогнать mypy --strict, исправить any/None-warnings.

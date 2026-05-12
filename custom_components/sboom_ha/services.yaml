@@ -1,0 +1,28 @@
+# Custom services для интеграции SBoom.
+# Регистрируются в services.py:async_register_services.
+
+refresh_metadata:
+  name: Refresh metadata
+  description: Force-fetch текущего трека и состояния колонки (без ожидания poll-цикла).
+  fields:
+    device_id:
+      name: Device
+      description: SberBoom-устройство (по умолчанию — все сконфигурированные).
+      required: false
+      selector:
+        device:
+          integration: sboom_ha
+          multiple: true
+
+reauth:
+  name: Re-authenticate (re-pair)
+  description: Запустить процесс повторной привязки. Нужно нажать "+" на корпусе колонки после вызова сервиса.
+  fields:
+    device_id:
+      name: Device
+      description: SberBoom-устройство для переавторизации.
+      required: false
+      selector:
+        device:
+          integration: sboom_ha
+          multiple: true

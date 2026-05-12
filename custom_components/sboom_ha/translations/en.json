@@ -1,0 +1,91 @@
+{
+  "config": {
+    "flow_title": "{name} ({host})",
+    "step": {
+      "user": {
+        "title": "SberBoom — speaker IP",
+        "description": "Enter the local IP of your SberBoom speaker.",
+        "data": {
+          "host": "IP address",
+          "port": "Port",
+          "client_name": "Client name (will be visible in your Sber account)"
+        }
+      },
+      "discovery_confirm": {
+        "title": "{name} discovered",
+        "description": "Found a SberBoom on the network:\n- Name: {name}\n- IP: {host}\n- Model: {model}\n\nSubmit to start pairing.",
+        "data": {
+          "client_name": "Client name (will be visible in your Sber account)"
+        }
+      },
+      "pair": {
+        "title": "Confirm pairing",
+        "description": "{name} ({host}) is waiting for confirmation.\n\n**Press the \"+\" button on the speaker**, then submit.\n\n(Timeout: {timeout} seconds)"
+      },
+      "reconfigure": {
+        "title": "Update {name} address",
+        "description": "Change the IP/port of an already-paired speaker. The pairing token is preserved.",
+        "data": {
+          "host": "IP address",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the speaker. Check the IP/port and LAN reachability.",
+      "pair_timeout": "The \"+\" button was not pressed in time. Try again."
+    },
+    "abort": {
+      "already_configured": "This speaker is already configured.",
+      "incomplete_discovery": "Discovered service is missing required device id."
+    }
+  },
+  "issues": {
+    "speaker_unreachable": {
+      "title": "{name} is unreachable",
+      "description": "Speaker has been offline for {minutes} minutes. Check the device power, network connection, and IP address. If the IP changed, use Settings → Integrations → SBoom → ⋮ → Reconfigure."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SBoom options",
+        "description": "Tune polling intervals and feature toggles. Changes apply immediately (the integration auto-reloads).",
+        "data": {
+          "volume_poll_interval": "Volume poll interval, seconds",
+          "keepalive_interval": "WebSocket keepalive interval, seconds",
+          "availability_threshold": "Disconnect threshold (failed reconnects)",
+          "lyrics_enabled": "Fetch synced lyrics from Lrclib.net"
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "next_track":      { "name": "Next track" },
+      "previous_track":  { "name": "Previous track" },
+      "play_pause":      { "name": "Play / Pause" },
+      "like":            { "name": "Like current track" },
+      "dislike":         { "name": "Dislike current track" },
+      "remove_like":     { "name": "Remove like" },
+      "remove_dislike":  { "name": "Remove dislike" }
+    },
+    "number": {
+      "volume": { "name": "Volume" }
+    },
+    "switch": {
+      "shuffle": { "name": "Shuffle" },
+      "mute":    { "name": "Mute" }
+    },
+    "select": {
+      "repeat": {
+        "name": "Repeat mode",
+        "state": {
+          "off":       "Off",
+          "playlist":  "Playlist",
+          "track":     "Track"
+        }
+      }
+    }
+  }
+}

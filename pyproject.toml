@@ -1,0 +1,36 @@
+# Dev-tooling конфиг для sboom_ha.
+#
+# ВАЖНО: секции [project] здесь НЕТ намеренно — это HACS-интеграция, версия живёт
+# только в custom_components/sboom_ha/manifest.json (источник истины для HA/HACS,
+# читается Hassfest). Дублирование версии в pyproject.toml приведёт к рассинхрону.
+# Если когда-нибудь захочется публиковать на PyPI — добавляй [project] явно.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "custom_components/sboom_ha/fonts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # длинные строки — line-length 100 уже регулирует
+    "B008",  # function-call-in-default-arg — типичный паттерн в HA
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # assert False — нормально в тестах
