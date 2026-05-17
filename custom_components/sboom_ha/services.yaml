@@ -26,3 +26,32 @@ reauth:
         device:
           integration: sboom_ha
           multiple: true
+
+bluetooth_device:
+  name: Bluetooth device command
+  description: Подключить, отключить или удалить спаренное Bluetooth-устройство колонки.
+  fields:
+    device_id:
+      name: Device
+      description: SberBoom-устройство (по умолчанию — все сконфигурированные).
+      required: false
+      selector:
+        device:
+          integration: sboom_ha
+          multiple: true
+    mac_address:
+      name: MAC address
+      description: MAC-адрес BT-устройства (см. атрибут devices сенсора «Спаренные Bluetooth-устройства»).
+      required: true
+      selector:
+        text:
+    command:
+      name: Command
+      description: Действие над устройством.
+      required: true
+      selector:
+        select:
+          options:
+            - connect
+            - disconnect
+            - remove

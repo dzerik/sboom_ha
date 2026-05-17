@@ -19,7 +19,56 @@ from sboom_ha.lyrics_client import (
     _parse_lrc,
     current_line,
     fetch_lyrics,
+    lyrics_from_dict,
+    lyrics_to_dict,
 )
+
+
+# ─────────────────── lyrics_to_dict / lyrics_from_dict ───────────────────
+
+
+def test_lyrics_roundtrip_synced():
+    """Synced lyrics: round-trip сохраняет поля, timeline пересобирается из synced."""
+    src = Lyrics(
+        plain="line one\nline two",
+        synced="[00:01.00]line one\n[00:05.50]line two",
+        instrumental=False,
+        source="lrclib",
+        timeline=_parse_lrc("[00:01.00]line one\n[00:05.50]line two"),
+    )
+    restored = lyrics_from_dict(lyrics_to_dict(src))
+    assert restored.plain == src.plain
+    assert restored.synced == src.synced
+    assert restored.instrumental is False
+    assert restored.source == "lrclib"
+    assert restored.timeline == src.timeline  # пересобран из synced
+
+
+def test_lyrics_roundtrip_plain_only():
+    """Без synced — timeline остаётся None."""
+    src = Lyrics(plain="just text", synced=None, instrumental=False,
+                 source="lrclib", timeline=None)
+    restored = lyrics_from_dict(lyrics_to_dict(src))
+    assert restored.plain == "just text"
+    assert restored.synced is None
+    assert restored.timeline is None
+
+
+def test_lyrics_roundtrip_instrumental():
+    src = Lyrics(plain=None, synced=None, instrumental=True,
+                 source="lrclib", timeline=None)
+    restored = lyrics_from_dict(lyrics_to_dict(src))
+    assert restored.instrumental is True
+    assert restored.plain is None
+
+
+def test_lyrics_to_dict_is_json_serialisable():
+    """Результат lyrics_to_dict должен быть JSON-совместим (для HA Store)."""
+    import json
+
+    d = lyrics_to_dict(Lyrics(plain="x", synced="[00:00.00]x", instrumental=False,
+                              source="lrclib", timeline=[(0.0, "x")]))
+    json.loads(json.dumps(d))  # не должно бросать
 
 
 # ─────────────────────────── _parse_lrc ───────────────────────────

@@ -20,6 +20,9 @@ from .image_render import draw_blank, draw_cover_yandex, draw_lyrics_with_cover
 
 _LOGGER = logging.getLogger(__name__)
 
+# Один MJPEG-стрим на сущность, данные из coordinator — параллелизм безразличен.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -65,16 +68,24 @@ class SboomLyricsCamera(SboomEntity, Camera):
         await response.prepare(request)
         try:
             while True:
-                track = self.coordinator.track
-                if not track:
-                    await _write_jpeg(response, draw_blank())
+                try:
+                    track = self.coordinator.track
+                    if not track:
+                        await _write_jpeg(response, draw_blank())
+                        await asyncio.sleep(2)
+                        continue
+                    lyrics = self.coordinator.current_lyrics()
+                    if lyrics and lyrics.timeline:
+                        await self._stream_lyrics_with_cover(response)
+                    else:
+                        await self._stream_idle(response)
+                except (asyncio.CancelledError, ConnectionResetError):
+                    raise
+                except Exception:
+                    # Сбой рендера/отрисовки кадра не должен ронять весь стрим
+                    # с HTTP 500 — логируем и пробуем снова после паузы.
+                    _LOGGER.exception("lyrics-стрим: ошибка кадра, повтор через 2s")
                     await asyncio.sleep(2)
-                    continue
-                lyrics = self.coordinator.current_lyrics()
-                if lyrics and lyrics.timeline:
-                    await self._stream_lyrics_with_cover(response)
-                else:
-                    await self._stream_idle(response)
         except (asyncio.CancelledError, ConnectionResetError):
             pass
         return response

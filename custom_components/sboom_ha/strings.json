@@ -75,5 +75,10 @@
         "name": "Remove dislike"
       }
     }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Could not run \"{action}\": speaker unavailable ({error})"
+    }
   }
 }

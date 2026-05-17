@@ -1,7 +1,6 @@
 """Button-entities для лайков и других one-shot команд."""
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -14,7 +13,8 @@ from ._entity_base import SboomEntity
 from .const import DOMAIN
 from .coordinator import SboomCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+# Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -75,6 +75,18 @@ BUTTONS: tuple[SboomButton, ...] = (
         icon="mdi:close-circle-outline",
         press_fn=lambda c: c.client.media_remove_dislike(),
     ),
+    SboomButton(
+        key="bt_pairing",
+        translation_key="bt_pairing",
+        icon="mdi:bluetooth",
+        press_fn=lambda c: c.client.bt_make_discoverable(),
+    ),
+    SboomButton(
+        key="find_remote",
+        translation_key="find_remote",
+        icon="mdi:remote",
+        press_fn=lambda c: c.client.find_remote(),
+    ),
 )
 
 
@@ -106,8 +118,7 @@ class SboomButtonEntity(SboomEntity, ButtonEntity):
         self._attr_unique_id = f"{self._device_unique_prefix}_{description.key}"
 
     async def async_press(self) -> None:
-        try:
-            await self.entity_description.press_fn(self.coordinator)
-        except Exception:
-            _LOGGER.exception("button %s press failed", self.entity_description.key)
-            raise
+        await self._run_command(
+            self.entity_description.press_fn(self.coordinator),
+            action=self.entity_description.key,
+        )

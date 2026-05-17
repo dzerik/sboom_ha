@@ -22,6 +22,9 @@ from .helpers import cover_url
 
 _LOGGER = logging.getLogger(__name__)
 
+# Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
+PARALLEL_UPDATES = 0
+
 SUPPORTED = (
     MediaPlayerEntityFeature.VOLUME_SET
     | MediaPlayerEntityFeature.VOLUME_STEP
@@ -153,40 +156,50 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
     # ─────────────────── commands ───────────────────
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await self.coordinator.client.set_volume(int(volume * 100))
+        await self._run_command(
+            self.coordinator.client.set_volume(int(volume * 100)), action="set volume"
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
         cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
-        await self.coordinator.client.set_volume(min(100, cur + 5))
+        await self._run_command(
+            self.coordinator.client.set_volume(min(100, cur + 5)), action="volume up"
+        )
 
     async def async_volume_down(self) -> None:
         cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
-        await self.coordinator.client.set_volume(max(0, cur - 5))
+        await self._run_command(
+            self.coordinator.client.set_volume(max(0, cur - 5)), action="volume down"
+        )
 
     async def async_media_play(self) -> None:
-        await self.coordinator.client.media_play()
+        await self._run_command(self.coordinator.client.media_play(), action="play")
 
     async def async_media_pause(self) -> None:
-        await self.coordinator.client.media_pause()
+        await self._run_command(self.coordinator.client.media_pause(), action="pause")
 
     async def async_media_next_track(self) -> None:
-        await self.coordinator.client.media_next()
+        await self._run_command(self.coordinator.client.media_next(), action="next track")
 
     async def async_media_previous_track(self) -> None:
-        await self.coordinator.client.media_prev()
+        await self._run_command(self.coordinator.client.media_prev(), action="previous track")
 
     async def async_media_seek(self, position: float) -> None:
-        await self.coordinator.client.seek_to(int(position))
+        await self._run_command(
+            self.coordinator.client.seek_to(int(position)), action="seek"
+        )
 
     async def async_mute_volume(self, mute: bool) -> None:
-        if mute:
-            await self.coordinator.client.media_mute()
-        else:
-            await self.coordinator.client.media_unmute()
+        cmd = self.coordinator.client.media_mute() if mute else self.coordinator.client.media_unmute()
+        await self._run_command(cmd, action="mute" if mute else "unmute")
 
     async def async_set_shuffle(self, shuffle: bool) -> None:
-        await self.coordinator.client.media_shuffle(shuffle)
+        await self._run_command(
+            self.coordinator.client.media_shuffle(shuffle), action="set shuffle"
+        )
 
     async def async_set_repeat(self, repeat: str) -> None:
-        await self.coordinator.client.media_repeat(repeat)
+        await self._run_command(
+            self.coordinator.client.media_repeat(repeat), action="set repeat"
+        )

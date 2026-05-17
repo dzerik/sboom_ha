@@ -11,6 +11,9 @@ from ._entity_base import SboomEntity
 from .const import DOMAIN
 from .coordinator import SboomCoordinator
 
+# Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -41,5 +44,7 @@ class SboomVolumeNumber(SboomEntity, NumberEntity):
         return self.coordinator.state.volume_percent if self.coordinator.state else None
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.client.set_volume(int(value))
+        await self._run_command(
+            self.coordinator.client.set_volume(int(value)), action="set volume"
+        )
         await self.coordinator.async_request_refresh()

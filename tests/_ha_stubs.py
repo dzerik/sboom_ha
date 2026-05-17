@@ -16,6 +16,36 @@ from enum import Enum, IntFlag
 from typing import Any, Callable
 
 
+# ── exceptions ───────────────────────────────────────────────────────────
+
+class HomeAssistantError(Exception):
+    """stub homeassistant.exceptions.HomeAssistantError.
+
+    Принимает translation_* kwargs как настоящий HA, чтобы код,
+    бросающий переводимые ошибки, тестировался без реального HA.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        translation_domain: str | None = None,
+        translation_key: str | None = None,
+        translation_placeholders: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(*args)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+        self.translation_placeholders = translation_placeholders
+
+
+class ConfigEntryNotReady(HomeAssistantError):
+    """stub: setup не готов, HA повторит попытку."""
+
+
+class ConfigEntryAuthFailed(HomeAssistantError):
+    """stub: требуется переавторизация."""
+
+
 # ── core ─────────────────────────────────────────────────────────────────
 
 class _FakeBus:
@@ -220,11 +250,13 @@ class DataUpdateCoordinator(_Generic):
         hass: HomeAssistant,
         logger,
         *,
+        config_entry=None,
         name: str = "",
         update_interval=None,
     ) -> None:
         self.hass = hass
         self.logger = logger
+        self.config_entry = config_entry
         self.name = name
         self.update_interval = update_interval
         self.data: Any = None
@@ -278,6 +310,22 @@ def async_track_time_interval(hass, fn, interval):
     return lambda: None
 
 
+class Store:
+    """Минимальный стаб homeassistant.helpers.storage.Store (in-memory)."""
+
+    def __init__(self, hass, version, key, **kwargs):
+        self._data = None
+
+    async def async_load(self):
+        return self._data
+
+    async def async_save(self, data):
+        self._data = data
+
+    def async_delay_save(self, data_func, delay=0):
+        self._data = data_func()
+
+
 # ── const / data_entry_flow ──────────────────────────────────────────────
 
 class Platform(str, Enum):
@@ -287,6 +335,7 @@ class Platform(str, Enum):
     SWITCH = "switch"
     SELECT = "select"
     SENSOR = "sensor"
+    BINARY_SENSOR = "binary_sensor"
     CAMERA = "camera"
 
 
@@ -392,11 +441,36 @@ def _make_module(name: str, **attrs: Any) -> types.ModuleType:
 
 
 def install_stubs() -> None:
-    """Зарегистрировать stub-модули. Идемпотентно."""
-    if "homeassistant" in sys.modules:
-        return
+    """Зарегистрировать stub-модули.
 
-    _make_module("homeassistant")
+    Идемпотентно: повторный вызов с уже установленными нашими stub'ами —
+    no-op (распознаём по маркеру `_SBOOM_STUB`).
+
+    Если в окружении установлен НАСТОЯЩИЙ пакет `homeassistant`, он
+    перехватит импорты вместо тестовых stub'ов, и тесты начнут падать с
+    невнятным `RuntimeError: Frame helper not set up`. Это бывает, когда
+    тесты запускают в venv соседнего проекта, где HA установлен (плюс
+    `pytest-homeassistant-custom-component` подтягивает HA ещё до conftest
+    и его уже не выбить из sys.modules безопасно). Вместо тихой деградации
+    падаем сразу с понятным сообщением.
+    """
+    existing = sys.modules.get("homeassistant")
+    if existing is not None:
+        if getattr(existing, "_SBOOM_STUB", False):
+            return  # наши stub'ы уже стоят
+        raise RuntimeError(
+            "В окружении установлен настоящий пакет 'homeassistant' — он "
+            "перехватывает импорты вместо тестовых stub'ов. Тесты sboom_ha "
+            "рассчитаны на чистый venv. Запускайте их так:\n"
+            "  python -m venv /tmp/sboom_venv\n"
+            "  /tmp/sboom_venv/bin/pip install pytest pytest-asyncio "
+            "aiohttp Pillow websockets\n"
+            "  /tmp/sboom_venv/bin/python -m pytest tests/\n"
+            "(см. CLAUDE.md → раздел «Тесты»)."
+        )
+
+    ha = _make_module("homeassistant")
+    ha._SBOOM_STUB = True
     _make_module(
         "homeassistant.const",
         Platform=Platform,
@@ -408,6 +482,12 @@ def install_stubs() -> None:
         HomeAssistant=HomeAssistant,
         callback=callback,
         ServiceCall=ServiceCall,
+    )
+    _make_module(
+        "homeassistant.exceptions",
+        HomeAssistantError=HomeAssistantError,
+        ConfigEntryNotReady=ConfigEntryNotReady,
+        ConfigEntryAuthFailed=ConfigEntryAuthFailed,
     )
     _make_module(
         "homeassistant.config_entries",
@@ -440,6 +520,7 @@ def install_stubs() -> None:
         "homeassistant.helpers.event",
         async_track_time_interval=async_track_time_interval,
     )
+    _make_module("homeassistant.helpers.storage", Store=Store)
     _make_module("homeassistant.helpers.service_info")
     _make_module(
         "homeassistant.helpers.service_info.zeroconf",

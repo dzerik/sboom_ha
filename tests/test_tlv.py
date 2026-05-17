@@ -1,7 +1,9 @@
 """Тесты бинарного TLV-кодека (varint + length-delimited)."""
 from __future__ import annotations
 
-from sboom_ha._tlv import decode, field, varint
+import struct
+
+from sboom_ha._tlv import decode, decode_repeated, field, varint
 
 
 # ─────────────────────── varint ───────────────────────
@@ -41,10 +43,22 @@ def test_field_kind2_empty_payload():
     assert field(5, 2, b"") == b"\x2a\x00"
 
 
+def test_field_kind5_float():
+    # tag=1, kind=5 (fixed32 float), value=1.5
+    # key = (1<<3) | 5 = 0x0d; payload = struct.pack("<f", 1.5)
+    assert field(1, 5, 1.5) == b"\x0d" + struct.pack("<f", 1.5)
+
+
+def test_field_kind5_float_reset_value():
+    # value=1.0 — кодировка для сброса скорости
+    assert field(1, 5, 1.0) == b"\x0d" + struct.pack("<f", 1.0)
+
+
 def test_field_unsupported_kind_raises():
     import pytest
+    # kind=1 (fixed64) не поддерживается кодеком
     with pytest.raises(ValueError, match="unsupported kind"):
-        field(1, 5, 0)
+        field(1, 1, 0)
 
 
 # ─────────────────────── decode roundtrips ───────────────────────
@@ -95,3 +109,31 @@ def test_decode_real_envelope_fragment():
     # Эмуляция "конверта": id=req-id (str), type=2 (varint)
     pkt = field(1, 0, 2) + field(2, 2, b"req-123")
     assert decode(pkt) == {1: 2, 2: "req-123"}
+
+
+# ─────────────────────── decode_repeated ───────────────────────
+
+def test_decode_repeated_collects_duplicate_tags():
+    # три раза тег 1 (varint) — decode_repeated собирает все, decode схлопнул бы
+    enc = field(1, 0, 10) + field(1, 0, 20) + field(1, 0, 30)
+    assert decode_repeated(enc) == {1: [10, 20, 30]}
+
+
+def test_decode_repeated_single_tag_still_list():
+    enc = field(5, 0, 99)
+    assert decode_repeated(enc) == {5: [99]}
+
+
+def test_decode_repeated_length_delim_returns_raw_bytes():
+    # length-delimited значения возвращаются сырыми (без авто-рекурсии)
+    enc = field(2, 2, b"hi") + field(2, 2, b"yo")
+    assert decode_repeated(enc) == {2: [b"hi", b"yo"]}
+
+
+def test_decode_repeated_empty():
+    assert decode_repeated(b"") == {}
+
+
+def test_decode_repeated_mixed_tags():
+    enc = field(1, 2, b"x") + field(3, 0, 7) + field(1, 2, b"y")
+    assert decode_repeated(enc) == {1: [b"x", b"y"], 3: [7]}

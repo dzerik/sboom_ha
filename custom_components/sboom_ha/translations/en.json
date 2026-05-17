@@ -68,7 +68,9 @@
       "like":            { "name": "Like current track" },
       "dislike":         { "name": "Dislike current track" },
       "remove_like":     { "name": "Remove like" },
-      "remove_dislike":  { "name": "Remove dislike" }
+      "remove_dislike":  { "name": "Remove dislike" },
+      "bt_pairing":      { "name": "Bluetooth pairing" },
+      "find_remote":     { "name": "Find remote" }
     },
     "number": {
       "volume": { "name": "Volume" }
@@ -85,7 +87,38 @@
           "playlist":  "Playlist",
           "track":     "Track"
         }
+      },
+      "playback_speed": {
+        "name": "Playback speed"
       }
+    },
+    "sensor": {
+      "lyrics_current_line":  { "name": "Lyrics current line" },
+      "lyrics":               { "name": "Lyrics" },
+      "led_brightness":       { "name": "Display brightness" },
+      "alarms":               { "name": "Alarms" },
+      "timers":               { "name": "Timers" },
+      "active_app":           { "name": "Active app" },
+      "assistant_character":  { "name": "Assistant character" },
+      "multiroom_mode":       { "name": "Multiroom mode" },
+      "network_type":         { "name": "Connection type" },
+      "paired_bt":            { "name": "Paired Bluetooth devices" }
+    },
+    "binary_sensor": {
+      "led_display":          { "name": "Display" },
+      "active":               { "name": "Active" },
+      "stereo_pair":          { "name": "Stereo pair" },
+      "subscription_device":  { "name": "Subscription device" },
+      "home_security":        { "name": "Home security" },
+      "morning_show":         { "name": "Morning show" }
+    },
+    "camera": {
+      "lyrics_camera": { "name": "Lyrics on TV" }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Could not run \"{action}\": speaker unavailable ({error})"
     }
   }
 }

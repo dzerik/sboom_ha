@@ -6,8 +6,8 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.const import PERCENTAGE, EntityCategory
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -16,6 +16,9 @@ from .const import DOMAIN
 from .coordinator import SboomCoordinator
 from .helpers import track_position
 from .lyrics_client import current_line
+
+# Read-only сенсоры, данные из coordinator — параллелизм безразличен.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -27,6 +30,14 @@ async def async_setup_entry(
     async_add_entities([
         SboomLyricsCurrentLineSensor(coordinator, entry),
         SboomLyricsFullSensor(coordinator, entry),
+        SboomLedBrightnessSensor(coordinator, entry),
+        SboomAlarmsSensor(coordinator, entry),
+        SboomTimersSensor(coordinator, entry),
+        SboomActiveAppSensor(coordinator, entry),
+        SboomAssistantCharacterSensor(coordinator, entry),
+        SboomMultiroomModeSensor(coordinator, entry),
+        SboomNetworkTypeSensor(coordinator, entry),
+        SboomPairedBtSensor(coordinator, entry),
     ])
 
 
@@ -49,6 +60,7 @@ class SboomLyricsCurrentLineSensor(SboomEntity, SensorEntity):
             async_track_time_interval(self.hass, self._tick, self._SYNC_INTERVAL)
         )
 
+    @callback
     def _tick(self, _now: datetime) -> None:
         line = self._compute_line()
         if line != self._last_line:
@@ -124,4 +136,156 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
             "plain_lyrics": lyrics.plain,
             "synced_lyrics": lyrics.synced,
             "instrumental": lyrics.instrumental,
+        }
+
+
+# ─────────────────── сенсоры подсистем GET_STATE ───────────────────
+
+
+class SboomLedBrightnessSensor(SboomEntity, SensorEntity):
+    """Яркость LED-дисплея колонки (0-100%)."""
+
+    _attr_translation_key = "led_brightness"
+    _attr_icon = "mdi:brightness-6"
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_led_brightness"
+
+    @property
+    def native_value(self) -> int | None:
+        dev = self.device_state
+        return dev.led_brightness if dev else None
+
+
+class SboomAlarmsSensor(SboomEntity, SensorEntity):
+    """Количество установленных будильников. Список — в атрибутах."""
+
+    _attr_translation_key = "alarms"
+    _attr_icon = "mdi:alarm"
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_alarms"
+
+    @property
+    def native_value(self) -> int | None:
+        dev = self.device_state
+        return dev.alarms_count if dev else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        dev = self.device_state
+        return {"alarms": dev.alarms} if dev else None
+
+
+class SboomTimersSensor(SboomEntity, SensorEntity):
+    """Количество активных таймеров. Список — в атрибутах."""
+
+    _attr_translation_key = "timers"
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_timers"
+
+    @property
+    def native_value(self) -> int | None:
+        dev = self.device_state
+        return dev.timers_count if dev else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        dev = self.device_state
+        return {"timers": dev.timers} if dev else None
+
+
+class SboomActiveAppSensor(SboomEntity, SensorEntity):
+    """Активное приложение колонки (music/bluetooth/news/…)."""
+
+    _attr_translation_key = "active_app"
+    _attr_icon = "mdi:application"
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_active_app"
+
+    @property
+    def native_value(self) -> str | None:
+        dev = self.device_state
+        return dev.active_app if dev else None
+
+
+class SboomAssistantCharacterSensor(SboomEntity, SensorEntity):
+    """Персона голосового ассистента (afina/joy/sber)."""
+
+    _attr_translation_key = "assistant_character"
+    _attr_icon = "mdi:account-voice"
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_assistant_character"
+
+    @property
+    def native_value(self) -> str | None:
+        dev = self.device_state
+        return dev.assistant_character if dev else None
+
+
+class SboomMultiroomModeSensor(SboomEntity, SensorEntity):
+    """Режим multiroom (NONE/…)."""
+
+    _attr_translation_key = "multiroom_mode"
+    _attr_icon = "mdi:speaker-multiple"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_multiroom_mode"
+
+    @property
+    def native_value(self) -> str | None:
+        dev = self.device_state
+        return dev.multiroom_mode if dev else None
+
+
+class SboomNetworkTypeSensor(SboomEntity, SensorEntity):
+    """Тип сетевого подключения колонки (WIFI/…)."""
+
+    _attr_translation_key = "network_type"
+    _attr_icon = "mdi:wifi"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_network_type"
+
+    @property
+    def native_value(self) -> str | None:
+        dev = self.device_state
+        return dev.network_type if dev else None
+
+
+class SboomPairedBtSensor(SboomEntity, SensorEntity):
+    """Спаренные с колонкой Bluetooth-устройства. State = количество, список — в атрибутах."""
+
+    _attr_translation_key = "paired_bt"
+    _attr_icon = "mdi:bluetooth-connect"
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_paired_bt"
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.paired_bt)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "devices": [
+                {"mac": d.mac, "name": d.name, "connected": d.connected}
+                for d in self.coordinator.paired_bt
+            ]
         }

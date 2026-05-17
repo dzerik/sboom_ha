@@ -11,7 +11,7 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 LRCLIB_BASE = "https://lrclib.net/api"
-USER_AGENT = "sboom_ha/HomeAssistant (+https://github.com/TohaRG2/sboom_ha)"
+USER_AGENT = "sboom_ha/HomeAssistant (+https://github.com/dzerik/sboom_ha)"
 
 # Парсер LRC-строк: [MM:SS.cc] текст  (или [MM:SS.ccc])
 _LRC_LINE = re.compile(r"^\[(\d{1,2}):(\d{2})\.(\d{2,3})](.*)$", flags=re.MULTILINE)
@@ -37,6 +37,28 @@ def _parse_lrc(synced: str) -> list[tuple[float, str]]:
         out.append((ts, text.strip()))
     out.sort(key=lambda x: x[0])
     return out
+
+
+def lyrics_to_dict(lyrics: Lyrics) -> dict:
+    """Сериализация Lyrics для HA Store. timeline опускаем — derived из synced."""
+    return {
+        "plain": lyrics.plain,
+        "synced": lyrics.synced,
+        "instrumental": lyrics.instrumental,
+        "source": lyrics.source,
+    }
+
+
+def lyrics_from_dict(data: dict) -> Lyrics:
+    """Десериализация Lyrics из HA Store. timeline пересобирается из synced."""
+    synced = data.get("synced")
+    return Lyrics(
+        plain=data.get("plain"),
+        synced=synced,
+        instrumental=bool(data.get("instrumental", False)),
+        source=data.get("source") or "lrclib",
+        timeline=_parse_lrc(synced) if synced else None,
+    )
 
 
 async def _request_get(

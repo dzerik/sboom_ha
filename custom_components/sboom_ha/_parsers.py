@@ -10,20 +10,139 @@ import logging
 import re
 from typing import Any, Optional
 
-from ._models import SpeakerState, TrackInfo
+from ._models import BluetoothDevice, DeviceState, QueueTrack, SpeakerState, TrackInfo
+from ._tlv import decode as _decode_tlv
+from ._tlv import decode_repeated as _decode_repeated
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _extract_json_object(s: str, start: int) -> Optional[str]:
+    """Сбалансированный JSON-объект, начиная с `{` на позиции start (учёт строк)."""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1]
+    return None
+
+
+def parse_device_state(data: dict[str, Any]) -> DeviceState:
+    """Извлекает подсистемы устройства из распарсенного JSON GET_STATE.
+
+    Каждый доступ защищён: отсутствующая подсистема → соответствующие поля None.
+    """
+    ds = DeviceState()
+
+    led = (data.get("capabilities_state") or {}).get("led_display") or {}
+    ds.led_brightness = led.get("brightness")
+    ds.led_on = led.get("turned_on")
+
+    alarm = data.get("alarm")
+    if isinstance(alarm, dict):
+        ds.alarms = alarm.get("alarms") or []
+        counter = alarm.get("alarmsCounter")
+        ds.alarms_count = counter if counter is not None else len(ds.alarms)
+        ds.timers = alarm.get("timers") or []
+        ds.timers_count = len(ds.timers)
+
+    sleep = data.get("deviceSleep")
+    if isinstance(sleep, dict):
+        ds.sleep_state = sleep.get("systemState")
+
+    multiroom = data.get("multiroom")
+    if isinstance(multiroom, dict):
+        ds.multiroom_mode = multiroom.get("mode")
+        ds.stereo_pair_active = (multiroom.get("stereoPair") or {}).get("active")
+
+    # active_app — приложение, которое реально играет (state.player.playing).
+    # background_apps — самотасующийся z-order стек, поэтому брать [0] нельзя:
+    # сенсор флапал бы каждый poll. Если ничего не играет — active_app=None.
+    apps = data.get("background_apps")
+    if isinstance(apps, list):
+        for app in apps:
+            if not isinstance(app, dict):
+                continue
+            player = (app.get("state") or {}).get("player")
+            if isinstance(player, dict) and player.get("playing") is True:
+                ds.active_app = (app.get("app_info") or {}).get("systemName")
+                break
+
+    assistant = data.get("assistant")
+    if isinstance(assistant, dict):
+        ds.assistant_character = assistant.get("character")
+
+    subscr = data.get("subscrDeviceInfo")
+    if isinstance(subscr, dict):
+        ds.is_subscription_device = subscr.get("isSubscrDevice")
+
+    network = data.get("network")
+    if isinstance(network, dict):
+        ds.network_type = network.get("connection_type")
+
+    security = data.get("homeSecurity")
+    if isinstance(security, dict):
+        ds.home_security = security.get("enabled")
+
+    show = data.get("morning_show")
+    if isinstance(show, dict):
+        ds.in_morning_show = show.get("in_show")
+
+    return ds
+
+
 def parse_state(raw: bytes) -> SpeakerState:
-    """Извлекает volume + muted из state-payload. Полный JSON — в .raw_state_json."""
+    """Парсит GET_STATE: volume/muted + подсистемы устройства (.device).
+
+    Стратегия: извлечь сбалансированный JSON-объект и распарсить. Если JSON
+    битый/частичный — fallback на regex по volume (старое поведение), device=None.
+    """
     st = SpeakerState()
     s = raw.decode("utf-8", errors="ignore")
+    idx = s.find("{")
+
+    obj = _extract_json_object(s, idx) if idx >= 0 else None
+    data: Optional[dict[str, Any]] = None
+    if obj is not None:
+        try:
+            parsed = json.loads(obj)
+            if isinstance(parsed, dict):
+                data = parsed
+        except json.JSONDecodeError:
+            data = None
+
+    if data is not None:
+        st.raw_state_json = obj
+        volume = data.get("volume")
+        if isinstance(volume, dict):
+            if "percent" in volume:
+                st.volume_percent = int(volume["percent"])
+            if "muted" in volume:
+                st.muted = bool(volume["muted"])
+        st.device = parse_device_state(data)
+        return st
+
+    # Fallback: битый JSON — regex по volume, как раньше.
     m = re.search(r'"volume":\s*\{\s*"muted":\s*(true|false)\s*,\s*"percent":\s*(\d+)', s)
     if m:
         st.muted = m.group(1) == "true"
         st.volume_percent = int(m.group(2))
-    idx = s.find("{")
     if idx >= 0:
         st.raw_state_json = s[idx:]
     return st
@@ -182,4 +301,101 @@ def parse_track(raw: bytes) -> Optional[TrackInfo]:
 
     ti.explicit = bool(data.get("explicit", False))
     ti.liked = bool(data.get("like", False))
+
+    # playbackSpeedRate: в push-формате — в data, в state-формате — в player{}
+    speed = data.get("playbackSpeedRate")
+    if speed is None:
+        speed = (outer or {}).get("playbackSpeedRate")
+    if speed is not None:
+        try:
+            ti.playback_speed = float(speed)
+        except (TypeError, ValueError):
+            ti.playback_speed = None
     return ti
+
+
+def parse_queue(raw: bytes) -> list[QueueTrack]:
+    """Парсит очередь воспроизведения из ответа op=17.
+
+    Формат: envelope `{5:{17:{5:<JSON-массив>}}}`, где массив —
+    `[{"explicit":bool,"trackId":int}, ...]`. Любой сбой → пустой список.
+    """
+    try:
+        decoded = _decode_tlv(raw)
+    except Exception:  # pragma: no cover — _decode_tlv защищён, но на всякий
+        return []
+
+    body = decoded.get(5)
+    if not isinstance(body, dict):
+        return []
+    inner = body.get(17)
+    if not isinstance(inner, dict):
+        return []
+    arr_str = inner.get(5)
+    if not isinstance(arr_str, str):
+        return []
+    try:
+        items = json.loads(arr_str)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(items, list):
+        return []
+
+    out: list[QueueTrack] = []
+    for it in items:
+        if isinstance(it, dict) and it.get("trackId") is not None:
+            out.append(
+                QueueTrack(
+                    track_id=str(it["trackId"]),
+                    explicit=bool(it.get("explicit", False)),
+                )
+            )
+    return out
+
+
+def _parse_bt_devices(
+    raw: bytes, op_tag: int, devices_field: int, with_rssi: bool
+) -> list[BluetoothDevice]:
+    """Общий парсер BT-списков (op=19 спаренные / op=21 найденные).
+
+    Навигация: envelope[5] → [op_tag] → repeated device-сообщения. Каждое —
+    {1:mac, 2:name, 3:connected|rssi}. Любой сбой → пустой список.
+    """
+    try:
+        env = _decode_repeated(raw)
+    except Exception:  # pragma: no cover
+        return []
+    body = env.get(5)
+    if not body:
+        return []
+    op_field = _decode_repeated(body[0]).get(op_tag)
+    if not op_field:
+        return []
+    dev_raws = _decode_repeated(op_field[0]).get(devices_field, [])
+    out: list[BluetoothDevice] = []
+    for dev_raw in dev_raws:
+        if not isinstance(dev_raw, bytes):
+            continue
+        d = _decode_tlv(dev_raw)
+        mac = d.get(1)
+        if not isinstance(mac, str):
+            continue
+        name = d.get(2) if isinstance(d.get(2), str) else ""
+        dev = BluetoothDevice(mac=mac, name=name)
+        if with_rssi:
+            rssi = d.get(3)
+            dev.rssi = rssi if isinstance(rssi, int) else None
+        else:
+            dev.connected = bool(d.get(3))
+        out.append(dev)
+    return out
+
+
+def parse_paired_bt(raw: bytes) -> list[BluetoothDevice]:
+    """op=19 GetPairedBluetoothDevices → список спаренных BT-устройств."""
+    return _parse_bt_devices(raw, op_tag=19, devices_field=1, with_rssi=False)
+
+
+def parse_scanned_bt(raw: bytes) -> list[BluetoothDevice]:
+    """op=21 GetScannedBluetoothDevices → список найденных BT-устройств."""
+    return _parse_bt_devices(raw, op_tag=21, devices_field=2, with_rssi=True)

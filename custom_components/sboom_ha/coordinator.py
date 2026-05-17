@@ -10,11 +10,13 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api import SberSpeakerClient, SpeakerState, TrackInfo
+from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
@@ -44,9 +46,14 @@ EVENT_CONNECTION_CHANGED = "sboom_connection_changed"
 
 # Issue: колонка недоступна больше N секунд → создаём info-issue в Repairs.
 UNREACHABLE_ISSUE_THRESHOLD_SEC = 300  # 5 минут
-from .lyrics_client import Lyrics, fetch_lyrics
+from .lyrics_client import Lyrics, fetch_lyrics, lyrics_from_dict, lyrics_to_dict
 
 _LOGGER = logging.getLogger(__name__)
+
+# Lyrics-кеш персистится в HA Store с debounce — чтобы не писать на диск
+# на каждый найденный трек.
+LYRICS_STORE_VERSION = 1
+LYRICS_SAVE_DELAY_SEC = 30
 
 
 class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -76,6 +83,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}:{entry.data.get(CONF_HOST)}",
             # State-pushes (volume/mute) от колонки НЕ приходят — приходит только
             # metadata. Поллим volume по сконфигурированному интервалу.
@@ -93,6 +101,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.state: SpeakerState | None = None
         self.track: TrackInfo | None = None
+        self.paired_bt: list[BluetoothDevice] = []  # спаренные BT-устройства (op=19)
         self.connected: bool = False  # доступность колонки (для entity.available)
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
@@ -102,6 +111,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.lyrics_by_track: dict[str, Lyrics | None] = {}
         self._lyrics_inflight: set[str] = set()
         self._http = async_get_clientsession(hass)
+        # Персистентный lyrics-кеш (JSON в .storage/, переживает рестарты HA).
+        self._lyrics_store: Store = Store(
+            hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}"
+        )
 
     @property
     def http_session(self):
@@ -111,10 +124,40 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ─────────────────────── lifecycle ───────────────────────
 
     async def async_start(self) -> None:
+        """Поднять связь с колонкой.
+
+        Первый connect выполняется СИНХРОННО: если колонка сейчас недоступна,
+        бросаем `ConfigEntryNotReady` — HA отложит и повторит setup, вместо
+        того чтобы поднять интеграцию в заведомо мёртвом состоянии. Дальнейшие
+        реконнекты при обрывах ведёт фоновый supervisor.
+        """
         self._stopping = False
+        await self._load_lyrics_cache()
+        try:
+            await self._connect_and_sync()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self.client.close()
+            raise ConfigEntryNotReady(
+                f"колонка {self.client.host} недоступна: {exc}"
+            ) from exc
         self._supervisor_task = self.hass.async_create_background_task(
             self._supervisor(), name=f"{DOMAIN}-supervisor"
         )
+
+    async def _connect_and_sync(self) -> None:
+        """Один connect + listener + стартовый sync. Бросает исключение при неудаче.
+
+        ВАЖНО: get_metadata (внутри _refresh_state_and_track) активирует
+        push-subscribe stream — после него устройство пушит unsolicited
+        updates на каждое изменение track/play/pause/volume.
+        """
+        await self.client.connect()
+        self.client.start_listening()
+        self._set_connected(True)
+        _LOGGER.info("connected to %s", self.client.host)
+        await self._refresh_state_and_track()
 
     async def async_stop(self) -> None:
         self._stopping = True
@@ -130,27 +173,32 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         attempt = 0
         while not self._stopping:
             try:
-                await self.client.connect()
-                self.client.start_listening()
+                # Первый заход: connect уже выполнен синхронно в async_start,
+                # соединение живое — пропускаем. Последующие заходы (после
+                # обрыва) — реконнектимся.
+                if self.client.disconnected.is_set():
+                    await self._connect_and_sync()
                 attempt = 0
-                self._set_connected(True)
-                _LOGGER.info("connected to %s", self.client.host)
-
-                # Стартовый sync. ВАЖНО: вызов get_metadata (внутри
-                # _refresh_state_and_track) активирует push-subscribe stream:
-                # после него устройство пушит unsolicited updates на каждое
-                # изменение track/play/pause/volume. Нам остаётся только
-                # poll'ить volume через get_state (push-stream его не покрывает).
-                await self._refresh_state_and_track()
 
                 # Держим соединение через KeepAlive. Track-changes приходят
                 # push-events через _handle_event (см. ниже).
                 while not self._stopping:
-                    await asyncio.sleep(self._keepalive_interval)
+                    # Ждём либо истечения keepalive-интервала, либо сигнала
+                    # обрыва от listen-loop — что наступит раньше. Так разрыв
+                    # ловится мгновенно, а не через ~keepalive_interval секунд.
+                    try:
+                        await asyncio.wait_for(
+                            self.client.disconnected.wait(),
+                            timeout=self._keepalive_interval,
+                        )
+                        _LOGGER.info("WS-обрыв замечен listen-loop'ом — reconnect")
+                        break
+                    except asyncio.TimeoutError:
+                        pass  # keepalive-интервал прошёл штатно
                     try:
                         await self.client.keep_alive()
-                    except Exception:
-                        _LOGGER.warning("keepalive failed, dropping connection")
+                    except Exception as exc:
+                        _LOGGER.warning("keepalive failed (%s), dropping connection", exc)
                         break
             except asyncio.CancelledError:
                 raise
@@ -218,6 +266,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("lyrics fetch error for %s — will retry later", track_id)
                 return
             self.lyrics_by_track[track_id] = result
+            # Персист в Store с debounce — не пишем на диск на каждый трек.
+            self._lyrics_store.async_delay_save(
+                self._lyrics_cache_data, LYRICS_SAVE_DELAY_SEC
+            )
             _LOGGER.debug(
                 "lyrics for %s (%r — %r): %s",
                 track_id, title, artist,
@@ -227,6 +279,31 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_set_updated_data({"state": self.state, "track": self.track})
         finally:
             self._lyrics_inflight.discard(track_id)
+
+    def _lyrics_cache_data(self) -> dict[str, dict]:
+        """Снимок lyrics-кеша для персиста (только реальные Lyrics, без None)."""
+        return {
+            tid: lyrics_to_dict(lyr)
+            for tid, lyr in self.lyrics_by_track.items()
+            if lyr is not None
+        }
+
+    async def _load_lyrics_cache(self) -> None:
+        """Загрузить персистентный lyrics-кеш из HA Store при старте."""
+        try:
+            stored = await self._lyrics_store.async_load()
+        except Exception:  # повреждённый файл — не критично, стартуем с пустым
+            _LOGGER.warning("lyrics cache load failed", exc_info=True)
+            return
+        if not isinstance(stored, dict):
+            return
+        for tid, payload in list(stored.items())[:LYRICS_CACHE_MAX]:
+            if isinstance(payload, dict):
+                try:
+                    self.lyrics_by_track[tid] = lyrics_from_dict(payload)
+                except Exception:  # битая запись — пропускаем
+                    continue
+        _LOGGER.debug("lyrics cache loaded: %d entries", len(self.lyrics_by_track))
 
     # ─────────────────────── data handlers ───────────────────────
 
@@ -238,8 +315,9 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("get_state -> volume=%s muted=%s",
                           self.state.volume_percent if self.state else "?",
                           self.state.muted if self.state else "?")
-        except Exception:
-            _LOGGER.exception("get_state failed")
+        except Exception as exc:
+            # Обрыв в процессе poll'а — штатно, супервизор реконнектит.
+            _LOGGER.warning("get_state failed: %s", exc)
         try:
             self.track = await self.client.get_metadata()
             self._maybe_fetch_lyrics()
@@ -254,8 +332,12 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             else:
                 _LOGGER.warning("get_metadata returned None — парсер не нашёл trackId")
-        except Exception:
-            _LOGGER.exception("get_metadata failed")
+        except Exception as exc:
+            _LOGGER.warning("get_metadata failed: %s", exc)
+        try:
+            self.paired_bt = await self.client.get_paired_bt_devices()
+        except Exception as exc:
+            _LOGGER.debug("get_paired_bt_devices failed: %s", exc)
         self._fire_change_events(prev_track, prev_state)
         self.async_set_updated_data({"state": self.state, "track": self.track})
 
@@ -382,5 +464,9 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fallback poll — если push не приходят."""
+        # Во время обрыва/реконнекта poll бессмысленен: запрос уйдёт в мёртвый
+        # сокет. Супервизор уже переподключается — отдаём последний known state.
+        if self.client.disconnected.is_set():
+            return {"state": self.state, "track": self.track}
         await self._refresh_state_and_track()
         return {"state": self.state, "track": self.track}

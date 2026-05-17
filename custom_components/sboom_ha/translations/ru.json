@@ -68,7 +68,9 @@
       "like":            { "name": "Лайк текущему треку" },
       "dislike":         { "name": "Дизлайк текущему треку" },
       "remove_like":     { "name": "Убрать лайк" },
-      "remove_dislike":  { "name": "Убрать дизлайк" }
+      "remove_dislike":  { "name": "Убрать дизлайк" },
+      "bt_pairing":      { "name": "Bluetooth-сопряжение" },
+      "find_remote":     { "name": "Найти пульт" }
     },
     "number": {
       "volume": { "name": "Громкость" }
@@ -85,14 +87,38 @@
           "playlist":  "Плейлист",
           "track":     "Трек"
         }
+      },
+      "playback_speed": {
+        "name": "Скорость воспроизведения"
       }
     },
     "sensor": {
-      "lyrics_current_line": { "name": "Текущая строка lyrics" },
-      "lyrics":               { "name": "Lyrics" }
+      "lyrics_current_line":  { "name": "Текущая строка lyrics" },
+      "lyrics":               { "name": "Lyrics" },
+      "led_brightness":       { "name": "Яркость дисплея" },
+      "alarms":               { "name": "Будильники" },
+      "timers":               { "name": "Таймеры" },
+      "active_app":           { "name": "Активное приложение" },
+      "assistant_character":  { "name": "Персона ассистента" },
+      "multiroom_mode":       { "name": "Режим multiroom" },
+      "network_type":         { "name": "Тип подключения" },
+      "paired_bt":            { "name": "Спаренные Bluetooth-устройства" }
+    },
+    "binary_sensor": {
+      "led_display":          { "name": "Дисплей" },
+      "active":               { "name": "Активна" },
+      "stereo_pair":          { "name": "Стереопара" },
+      "subscription_device":  { "name": "Устройство подписки" },
+      "home_security":        { "name": "Домашняя безопасность" },
+      "morning_show":         { "name": "Утреннее шоу" }
     },
     "camera": {
       "lyrics_camera": { "name": "Lyrics на ТВ" }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Не удалось выполнить «{action}»: колонка недоступна ({error})"
     }
   }
 }

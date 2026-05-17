@@ -1,10 +1,14 @@
 """Базовый класс сущности sboom_ha — с DeviceInfo и привязкой к coordinator."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
+
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from ._models import DeviceState
 from .const import (
     CONF_DEVICE_FIRMWARE,
     CONF_DEVICE_ID,
@@ -41,6 +45,12 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
         )
 
     @property
+    def device_state(self) -> DeviceState | None:
+        """Подсистемы устройства из последнего GET_STATE, либо None."""
+        state = self.coordinator.state
+        return state.device if state else None
+
+    @property
     def available(self) -> bool:
         """Entity доступна когда WS-сессия с колонкой жива.
 
@@ -49,3 +59,22 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
         транзиентных сетевых проблемах.
         """
         return self.coordinator.connected
+
+    async def _run_command(self, coro: Awaitable[None], *, action: str) -> None:
+        """Выполнить команду к колонке, обернув транспортные сбои.
+
+        WS-клиент при мёртвом соединении бросает сырые RuntimeError/
+        ConnectionError/TimeoutError — без обёртки они всплывают в UI HA
+        некрасивым traceback'ом. Оборачиваем в HomeAssistantError с
+        переводимым сообщением.
+        """
+        try:
+            await coro
+        except HomeAssistantError:
+            raise
+        except Exception as exc:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"action": action, "error": str(exc)},
+            ) from exc

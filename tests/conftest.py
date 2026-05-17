@@ -1,6 +1,7 @@
 """Pytest fixtures для тестов sboom_ha."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -57,6 +58,57 @@ def real_track_state_format_raw() -> bytes:
         b'"title":"Test Track 2",'
         b'"trackId":"2002"}}}'
     )
+
+
+@pytest.fixture
+def device_state_raw() -> bytes:
+    """Синтетический GET_STATE-payload — структура реального дампа без PII.
+
+    Бинарные префикс/суффикс имитируют сырой payload колонки (parse_state
+    извлекает сбалансированный JSON-объект, мусор по краям игнорируется).
+    """
+    state = {
+        "alarm": {
+            "alarms": [], "alarmsCounter": 0, "clocks": [],
+            "playing": None, "status": 1, "timers": [],
+        },
+        "assistant": {"auto_volume": False, "character": "afina"},
+        "background_apps": [
+            {"app_info": {"systemName": "music",
+                          "frontendEndpoint": "ru.sberdevices.music"},
+             "state": {"player": {"playing": True}}},
+            {"app_info": {"systemName": "voice_auth"}, "state": {}},
+        ],
+        "capabilities_state": {"led_display": {"brightness": 100, "turned_on": True}},
+        "current_app": {"app_info": {}, "state": {}},
+        "deviceSleep": {"systemState": "working"},
+        "homeSecurity": {"enabled": False},
+        "locale": {"locale": "ru_RU"},
+        "morning_show": {"from_show": False, "in_show": False},
+        "multiroom": {"enabled": True, "mode": "NONE", "stereoPair": {"active": False}},
+        "network": {"connection_type": "WIFI", "ip": "0.0.0.0"},
+        "proactivityNotification": {"hasNotification": False},
+        "subscrDeviceInfo": {"isSubscrDevice": False},
+        "volume": {"muted": False, "percent": 3},
+    }
+    return b"\x00\x00" + json.dumps(state).encode() + b"\x00\xff"
+
+
+@pytest.fixture
+def queue_raw() -> bytes:
+    """Синтетический ответ op=17 (очередь) — формат как в research/exp_23.
+
+    Envelope {1:2, 2:rid, 5:{17:{4:…, 5:<JSON-массив>, 6:0}}}.
+    """
+    from sboom_ha._tlv import field
+
+    arr = json.dumps([
+        {"explicit": False, "trackId": tid}
+        for tid in (112774234, 112774241, 112774249, 112774276, 112774292, 112774302)
+    ])
+    inner = field(4, 2, bytes.fromhex("0405")) + field(5, 2, arr.encode()) + field(6, 0, 0)
+    body = field(17, 2, inner)
+    return field(1, 0, 2) + field(2, 2, b"req-queue") + field(5, 2, body)
 
 
 @pytest.fixture

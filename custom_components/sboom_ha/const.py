@@ -17,7 +17,6 @@ CONF_PIN_ACCESS_TOKEN = "pin_access_token"
 VOLUME_SCALE_MAX = 100
 
 # Интервалы
-KEEPALIVE_INTERVAL_SEC = 25     # пинг-keepalive
 RECONNECT_BACKOFF_SEC  = (1, 2, 5, 10, 30, 60)
 PAIR_BUTTON_TIMEOUT_SEC = 120   # сколько ждать нажатия "+" на колонке
 
@@ -25,11 +24,23 @@ PAIR_BUTTON_TIMEOUT_SEC = 120   # сколько ждать нажатия "+" �
 OP_PIN_CONNECT       = 4
 OP_GET_META_DATA     = 10
 OP_GET_STATE         = 12
+OP_FIND_REMOTE       = 13  # поиск пульта ДУ
 OP_SET_VOLUME        = 14
 OP_SET_TRACK_POS     = 15
 OP_MEDIA_COMMAND     = 16
 OP_GET_PLAYING_QUEUE = 17
 OP_KEEP_ALIVE        = 18
+OP_GET_PAIRED_BT     = 19  # список спаренных Bluetooth-устройств
+OP_BT_DEVICE_COMMAND = 20  # команда BT-устройству (connect/disconnect/remove)
+OP_GET_SCANNED_BT    = 21  # список найденных Bluetooth-устройств
+OP_BT_DISCOVERABLE   = 22  # режим Bluetooth-сопряжения
+OP_SET_PLAYBACK_SPEED = 23  # скорость воспроизведения, float-кодировка (research exp_22)
+
+# Скорость воспроизведения: границы и пресеты для select-entity.
+# 0.0 — битое состояние колонки (см. research exp_22), поэтому минимум 0.5.
+PLAYBACK_SPEED_MIN = 0.5
+PLAYBACK_SPEED_MAX = 2.0
+PLAYBACK_SPEED_OPTIONS = ["0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
 
 # Опкоды медиа-команд (поле action в media-command-операции).
 MEDIA_CMD_MUTE             = 0
@@ -48,6 +59,11 @@ MEDIA_CMD_REPEAT_PLAYLIST  = 12
 MEDIA_CMD_REPEAT_TRACK     = 13
 MEDIA_CMD_DISLIKE          = 14
 MEDIA_CMD_REMOVE_DISLIKE   = 15
+
+# Команды BT-устройству (поле cmd в op=20).
+BT_CMD_CONNECT    = 0
+BT_CMD_DISCONNECT = 1
+BT_CMD_REMOVE     = 2
 
 # Тип токена для PIN-сессии (единственный поддерживаемый этой интеграцией).
 TOKEN_TYPE_PIN_AUTH = 1

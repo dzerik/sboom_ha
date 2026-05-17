@@ -52,11 +52,15 @@ def _decode_props(raw: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     for k, v in (raw or {}).items():
         if isinstance(k, bytes):
-            try: k = k.decode("utf-8")
-            except UnicodeDecodeError: continue
+            try:
+                k = k.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
         if isinstance(v, bytes):
-            try: v = v.decode("utf-8")
-            except UnicodeDecodeError: v = v.hex()
+            try:
+                v = v.decode("utf-8")
+            except UnicodeDecodeError:
+                v = v.hex()
         if v is not None:
             out[str(k)] = str(v)
     return out
@@ -223,10 +227,33 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             new_host = user_input[CONF_HOST]
             new_port = user_input.get(CONF_PORT, entry.data.get(CONF_PORT, DEFAULT_PORT))
-            return self.async_update_reload_and_abort(
-                entry,
-                data_updates={CONF_HOST: new_host, CONF_PORT: new_port},
+            # Проверяем, что по новому адресу действительно отвечает колонка —
+            # иначе entry перезагрузится в заведомо мёртвое состояние, а юзер
+            # не увидит почему (опечатка в IP — частый случай).
+            client = SberSpeakerClient(
+                host=new_host,
+                port=new_port,
+                client_id=entry.data.get(CONF_CLIENT_ID, str(uuid.uuid4())),
+                client_name=entry.data.get(CONF_CLIENT_NAME, "Home Assistant"),
             )
+            try:
+                await client.connect()
+            except Exception:
+                _LOGGER.debug(
+                    "reconfigure: connect to %s:%s failed", new_host, new_port,
+                    exc_info=True,
+                )
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_HOST: new_host, CONF_PORT: new_port},
+                )
+            finally:
+                try:
+                    await client.close()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("client.close in reconfigure finally failed", exc_info=True)
 
         return self.async_show_form(
             step_id="reconfigure",

@@ -13,6 +13,9 @@ from ._entity_base import SboomEntity
 from .const import DOMAIN
 from .coordinator import SboomCoordinator
 
+# Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
+PARALLEL_UPDATES = 0
+
 
 @dataclass(frozen=True, kw_only=True)
 class SboomSwitch(SwitchEntityDescription):
@@ -64,9 +67,15 @@ class SboomSwitchEntity(SboomEntity, SwitchEntity):
         return self.entity_description.is_on_fn(self.coordinator)
 
     async def async_turn_on(self, **kwargs) -> None:
-        await self.entity_description.turn_on_fn(self.coordinator)
+        await self._run_command(
+            self.entity_description.turn_on_fn(self.coordinator),
+            action=f"{self.entity_description.key} on",
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
-        await self.entity_description.turn_off_fn(self.coordinator)
+        await self._run_command(
+            self.entity_description.turn_off_fn(self.coordinator),
+            action=f"{self.entity_description.key} off",
+        )
         await self.coordinator.async_request_refresh()
