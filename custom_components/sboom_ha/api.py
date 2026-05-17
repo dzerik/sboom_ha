@@ -15,21 +15,10 @@ from typing import Any, Awaitable, Callable, Optional
 
 import websockets
 
-
-def _detect_headers_kwarg() -> str:
-    """websockets ≥ 13 → additional_headers; legacy → extra_headers."""
-    try:
-        params = inspect.signature(websockets.connect).parameters
-        if "additional_headers" in params:
-            return "additional_headers"
-    except (ValueError, TypeError):
-        pass
-    return "extra_headers"
-
-
-_HEADERS_KWARG = _detect_headers_kwarg()
-
-from ._models import SpeakerState, TrackInfo
+from ._models import BluetoothDevice, QueueTrack, SpeakerState, TrackInfo
+from ._parsers import parse_paired_bt as _parse_paired_bt
+from ._parsers import parse_queue as _parse_queue
+from ._parsers import parse_scanned_bt as _parse_scanned_bt
 from ._parsers import parse_state as _parse_state
 from ._parsers import parse_track as _parse_track
 from ._tlv import decode as _decode_tlv
@@ -37,7 +26,6 @@ from ._tlv import field as _field
 from .const import (
     DEFAULT_PORT,
     DEFAULT_USER_AGENT,
-    KEEPALIVE_INTERVAL_SEC,
     MEDIA_CMD_DISLIKE,
     MEDIA_CMD_LIKE,
     MEDIA_CMD_MUTE,
@@ -58,12 +46,34 @@ from .const import (
     OP_GET_STATE,
     OP_KEEP_ALIVE,
     OP_MEDIA_COMMAND,
+    OP_BT_DEVICE_COMMAND,
+    OP_BT_DISCOVERABLE,
+    OP_FIND_REMOTE,
+    OP_GET_PAIRED_BT,
+    OP_GET_SCANNED_BT,
     OP_PIN_CONNECT,
+    OP_SET_PLAYBACK_SPEED,
     OP_SET_TRACK_POS,
     OP_SET_VOLUME,
     PAIR_BUTTON_TIMEOUT_SEC,
+    PLAYBACK_SPEED_MAX,
+    PLAYBACK_SPEED_MIN,
     TOKEN_TYPE_PIN_AUTH,
 )
+
+
+def _detect_headers_kwarg() -> str:
+    """websockets ≥ 13 → additional_headers; legacy → extra_headers."""
+    try:
+        params = inspect.signature(websockets.connect).parameters
+        if "additional_headers" in params:
+            return "additional_headers"
+    except (ValueError, TypeError):
+        pass
+    return "extra_headers"
+
+
+_HEADERS_KWARG = _detect_headers_kwarg()
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,9 +119,13 @@ class SberSpeakerClient:
 
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._listener_task: Optional[asyncio.Task] = None
-        self._keepalive_task: Optional[asyncio.Task] = None
         self._pending: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
+        # Выставляется при выходе из _listen_loop (обрыв связи). Супервизор
+        # ждёт это событие, чтобы среагировать на разрыв мгновенно, не дожидаясь
+        # следующего keepalive-цикла. connect() его сбрасывает.
+        self._disconnected = asyncio.Event()
+        self._disconnected.set()  # до первого connect() клиент не подключён
 
     # ────────────────────────────── connection ──────────────────────────────
 
@@ -137,6 +151,7 @@ class SberSpeakerClient:
             _HEADERS_KWARG: [("User-Agent", DEFAULT_USER_AGENT)],
         }
         self._ws = await websockets.connect(url, **connect_kwargs)
+        self._disconnected.clear()
         # NB: listener НЕ стартуется автоматически — он конфликтует с прямыми
         # recv()-вызовами в pair_with_button. После завершения pair (или сразу
         # при reconnect к спареной колонке) надо вызвать start_listening().
@@ -151,9 +166,6 @@ class SberSpeakerClient:
         self._listener_task = asyncio.create_task(self._listen_loop(), name="sboom-listener")
 
     async def close(self) -> None:
-        if self._keepalive_task:
-            self._keepalive_task.cancel()
-            self._keepalive_task = None
         if self._listener_task:
             self._listener_task.cancel()
             self._listener_task = None
@@ -163,6 +175,16 @@ class SberSpeakerClient:
             except Exception:  # pragma: no cover
                 pass
             self._ws = None
+        self._disconnected.set()
+
+    @property
+    def disconnected(self) -> asyncio.Event:
+        """Событие обрыва: set когда listen-loop завершился, clear после connect().
+
+        Супервизор ждёт его, чтобы реагировать на разрыв сразу; poll сверяется
+        с ним, чтобы не слать запросы в мёртвый сокет.
+        """
+        return self._disconnected
 
     # ────────────────────────────── pair flow ──────────────────────────────
 
@@ -173,6 +195,12 @@ class SberSpeakerClient:
         """
         if not self._ws:
             raise RuntimeError("not connected")
+        # pair-flow читает ответы прямым recv() в цикле — это конфликтует с
+        # фоновым listen-loop, который перехватил бы те же сообщения.
+        if self._listener_task and not self._listener_task.done():
+            raise RuntimeError(
+                "pair_with_button нельзя вызывать при активном listen-loop"
+            )
 
         # отправляем pair-init (пустой запрос)
         cast = _field(OP_PIN_CONNECT, 2, _field(1, 2, b""))
@@ -253,9 +281,28 @@ class SberSpeakerClient:
         resp = await self._request_response(_field(OP_GET_META_DATA, 2, _field(1, 2, b"")))
         return self._extract_track(resp)
 
-    async def get_queue(self) -> dict[int, Any]:
+    async def get_queue(self) -> list[QueueTrack]:
         resp = await self._request_response(_field(OP_GET_PLAYING_QUEUE, 2, _field(1, 2, b"")))
-        return _decode_tlv(resp)
+        return _parse_queue(resp)
+
+    async def get_paired_bt_devices(self) -> list[BluetoothDevice]:
+        """op=19 — список спаренных Bluetooth-устройств колонки."""
+        resp = await self._request_response(_field(OP_GET_PAIRED_BT, 2, _field(1, 2, b"")))
+        return _parse_paired_bt(resp)
+
+    async def get_scanned_bt_devices(self) -> list[BluetoothDevice]:
+        """op=21 — список найденных при сканировании Bluetooth-устройств."""
+        resp = await self._request_response(_field(OP_GET_SCANNED_BT, 2, _field(1, 2, b"")))
+        return _parse_scanned_bt(resp)
+
+    async def bt_device_command(self, mac: str, cmd: int) -> None:
+        """op=20 — команда BT-устройству по MAC.
+
+        cmd: BT_CMD_CONNECT / BT_CMD_DISCONNECT / BT_CMD_REMOVE.
+        Request — {mac (поле 1), cmd (поле 2, varint)}.
+        """
+        inner = _field(1, 2, mac.encode()) + _field(2, 0, int(cmd))
+        await self._fire_and_forget(_field(OP_BT_DEVICE_COMMAND, 2, inner))
 
     async def set_volume(self, percent: int) -> None:
         percent = max(0, min(100, int(percent)))
@@ -311,8 +358,31 @@ class SberSpeakerClient:
         cast = _field(OP_SET_TRACK_POS, 2, _field(1, 0, int(position_sec)))
         await self._fire_and_forget(cast)
 
+    async def set_playback_speed(self, rate: float) -> None:
+        """Скорость воспроизведения (op=23).
+
+        modifier кодируется как float (wire-type 5, 4 байта LE IEEE-754).
+        varint и nested-JSON ломают playbackSpeedRate колонки в 0.0
+        (research exp_22), поэтому только float и обязательный clamp.
+        """
+        rate = max(PLAYBACK_SPEED_MIN, min(PLAYBACK_SPEED_MAX, float(rate)))
+        cast = _field(OP_SET_PLAYBACK_SPEED, 2, _field(1, 5, rate))
+        await self._fire_and_forget(cast)
+
     async def keep_alive(self) -> None:
         await self._fire_and_forget(_field(OP_KEEP_ALIVE, 2, _field(1, 2, b"")))
+
+    async def find_remote(self) -> None:
+        """op=13 — команда поиска пульта ДУ. Request — пустое сообщение."""
+        await self._fire_and_forget(_field(OP_FIND_REMOTE, 2, _field(1, 2, b"")))
+
+    async def bt_make_discoverable(self) -> None:
+        """op=22 — включить режим Bluetooth-сопряжения.
+
+        Request — пустое сообщение. Длительность окна видимости задаёт
+        прошивка колонки (протоколом не управляется).
+        """
+        await self._fire_and_forget(_field(OP_BT_DISCOVERABLE, 2, _field(1, 2, b"")))
 
     # ────────────────────────────── internals ──────────────────────────────
 
@@ -379,8 +449,20 @@ class SberSpeakerClient:
                         _LOGGER.exception("on_event handler raised")
         except asyncio.CancelledError:
             raise
+        except (websockets.exceptions.ConnectionClosed, OSError) as exc:
+            # Штатный обрыв долгоживущего WS (колонка перезагрузилась, Wi-Fi
+            # мигнул, idle-disconnect). Не исключение — INFO без traceback.
+            _LOGGER.info("WS closed (%s) — переподключение", exc.__class__.__name__)
         except Exception:
             _LOGGER.exception("listen loop crashed")
+        finally:
+            # Разбудить супервизор: связь мертва, нужно реконнектиться.
+            self._disconnected.set()
+            # Отменить ожидающие запросы, чтобы они не висели до таймаута.
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(ConnectionError("WS closed"))
+            self._pending.clear()
 
     # ────────────────────────────── parsers ──────────────────────────────
 
@@ -393,6 +475,21 @@ class SberSpeakerClient:
     def parse_track(raw: bytes) -> Optional[TrackInfo]:
         """Public wrapper — делегирует в _parsers.parse_track."""
         return _parse_track(raw)
+
+    @staticmethod
+    def parse_queue(raw: bytes) -> list[QueueTrack]:
+        """Public wrapper — делегирует в _parsers.parse_queue."""
+        return _parse_queue(raw)
+
+    @staticmethod
+    def parse_paired_bt(raw: bytes) -> list[BluetoothDevice]:
+        """Public wrapper — делегирует в _parsers.parse_paired_bt."""
+        return _parse_paired_bt(raw)
+
+    @staticmethod
+    def parse_scanned_bt(raw: bytes) -> list[BluetoothDevice]:
+        """Public wrapper — делегирует в _parsers.parse_scanned_bt."""
+        return _parse_scanned_bt(raw)
 
     # backwards-compat алиасы для внутренних вызовов в этом классе
     _extract_state = staticmethod(_parse_state)

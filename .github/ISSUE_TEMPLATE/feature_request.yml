@@ -1,0 +1,16 @@
+name: Feature request
+description: Предложить новую функцию
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: feature
+    attributes:
+      label: Что хотелось бы добавить
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use-case
+      description: Какую задачу решает фича? Как ты планируешь её использовать?

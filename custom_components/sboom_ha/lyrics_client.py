@@ -11,7 +11,7 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 LRCLIB_BASE = "https://lrclib.net/api"
-USER_AGENT = "sboom_ha/HomeAssistant (+https://github.com/dzerik/sboom_ha)"
+USER_AGENT = "sboom_ha/HomeAssistant"
 
 # Парсер LRC-строк: [MM:SS.cc] текст  (или [MM:SS.ccc])
 _LRC_LINE = re.compile(r"^\[(\d{1,2}):(\d{2})\.(\d{2,3})](.*)$", flags=re.MULTILINE)

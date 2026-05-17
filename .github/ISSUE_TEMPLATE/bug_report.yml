@@ -1,0 +1,62 @@
+name: Bug report
+description: Сообщить о баге в sboom_ha
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение! Пожалуйста, заполните как можно больше полей.
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: integration-version
+    attributes:
+      label: sboom_ha version
+      placeholder: "0.5.1"
+    validations:
+      required: true
+
+  - type: input
+    id: device-model
+    attributes:
+      label: Модель колонки и firmware
+      placeholder: "SberBoom Home"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Опиши проблему. Что ожидал, что получил.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      placeholder: |
+        1. Открыть HA
+        2. Нажать на ...
+        3. Видим ...
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи HA
+      description: |
+        Settings → System → Logs → Filter "sboom_ha". Включи DEBUG в configuration.yaml:
+        ```yaml
+        logger:
+          logs:
+            custom_components.sboom_ha: debug
+        ```
+      render: text
