@@ -75,9 +75,6 @@ jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
-    # TODO: включить strict (убрать continue-on-error) после чистки кода —
-    # сейчас в коде есть накопленные нарушения ruff, джоб пока информационный.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -92,8 +89,8 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
+      # Только ruff check (strict). `ruff format --check` сознательно не
+      # включён: проект использует ручное выравнивание (const, спеки),
+      # массовое переформатирование уничтожило бы стиль и git blame.
       - name: Ruff check
         run: ruff check custom_components/ tests/
-
-      - name: Ruff format check
-        run: ruff format --check custom_components/ tests/

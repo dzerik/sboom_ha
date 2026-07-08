@@ -4,16 +4,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tests._fakes import build_coordinator, make_state, make_track
-from tests._ha_stubs import HomeAssistant, ServiceCall
-
 from sboom_ha.const import DOMAIN
 from sboom_ha.services import (
     SERVICE_REAUTH,
     SERVICE_REFRESH_METADATA,
     async_register_services,
 )
+
+from tests._fakes import build_coordinator, make_state, make_track
+from tests._ha_stubs import HomeAssistant, ServiceCall
 
 
 def _setup_hass_with_coord(coord) -> HomeAssistant:

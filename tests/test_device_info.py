@@ -1,10 +1,10 @@
 """Тесты DeviceInfo: firmware/serial_number/host пробрасываются в карточку устройства HA."""
 from __future__ import annotations
 
-from tests._fakes import build_coordinator, make_entry, make_state, make_track
-
 from sboom_ha.const import DOMAIN
 from sboom_ha.media_player import SboomMediaPlayer
+
+from tests._fakes import build_coordinator, make_entry, make_state, make_track
 
 
 def test_device_info_full_zeroconf_data():

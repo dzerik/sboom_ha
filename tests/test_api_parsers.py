@@ -13,7 +13,6 @@ from __future__ import annotations
 from sboom_ha._tlv import field
 from sboom_ha.api import SberSpeakerClient
 
-
 # ─────────────────────── parse_track ───────────────────────
 
 def test_parse_track_push_format(real_track_money_raw):

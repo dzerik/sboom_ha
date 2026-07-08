@@ -9,12 +9,13 @@
 """
 from __future__ import annotations
 
+# ruff: noqa: UP042  # str+Enum в стабах намеренно: совместимо с py3.11 без StrEnum
 import sys
 import types
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, IntFlag
-from typing import Any, Callable
-
+from typing import Any
 
 # ── exceptions ───────────────────────────────────────────────────────────
 
@@ -204,13 +205,256 @@ class ConfigEntry:
         self.reauth_started = True
 
 
-class ConfigFlow:
-    """Заглушка для config_flow.SboomConfigFlow (не тестируется здесь)."""
+SOURCE_IGNORE = "ignore"
+
+_UNDEFINED = object()
+
+
+class AbortFlow(HomeAssistantError):
+    """Stub homeassistant.data_entry_flow.AbortFlow.
+
+    Реальный flow-manager HA ловит это исключение и превращает его в
+    abort-результат. В unit-тестах без manager'а исключение долетает до
+    теста — ловить его там (или через обёртку) и есть контракт.
+    """
+
+    def __init__(self, reason: str, description_placeholders: dict | None = None) -> None:
+        super().__init__(f"Flow aborted: {reason}")
+        self.reason = reason
+        self.description_placeholders = description_placeholders
+
+
+class _FlowHandlerBase:
+    """Общие async_show_form/async_create_entry/async_abort для Config/Options flow."""
+
+    def async_show_form(
+        self,
+        *,
+        step_id: str | None = None,
+        data_schema: Any = None,
+        errors: dict[str, str] | None = None,
+        description_placeholders: dict[str, str] | None = None,
+        last_step: bool | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": dict(errors or {}),
+            "description_placeholders": dict(description_placeholders or {}),
+        }
+
+    def async_create_entry(
+        self,
+        *,
+        title: str = "",
+        data: dict | None = None,
+        options: dict | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return {
+            "type": "create_entry",
+            "title": title,
+            "data": dict(data or {}),
+            "options": dict(options or {}),
+        }
+
+    def async_abort(
+        self, *, reason: str, description_placeholders: dict | None = None
+    ) -> dict[str, Any]:
+        return {
+            "type": "abort",
+            "reason": reason,
+            "description_placeholders": dict(description_placeholders or {}),
+        }
+
+
+class ConfigFlow(_FlowHandlerBase):
+    """Рабочий минимум config_entries.ConfigFlow для unit-тестов config_flow.py.
+
+    Семантика unique_id / _abort_if_unique_id_configured /
+    _async_abort_entries_match повторяет HA. `hass` и `context` в реальном HA
+    проставляет flow-manager после инстанцирования — в тестах присваивать
+    вручную: `flow.hass = hass; flow.context = {...}`.
+    """
+
+    hass: Any = None
 
     def __init_subclass__(cls, **kwargs) -> None:
         # Поглощаем `domain=DOMAIN` kwarg в `class SboomConfigFlow(ConfigFlow, domain=...)`.
-        kwargs.pop("domain", None)
+        cls._domain = kwargs.pop("domain", None)
         super().__init_subclass__(**kwargs)
+
+    # context/unique_id — как в HA: context назначается менеджером,
+    # unique_id живёт внутри context. Ленивое создание, потому что
+    # подклассы не зовут super().__init__().
+    @property
+    def context(self) -> dict[str, Any]:
+        if not hasattr(self, "_context"):
+            self._context: dict[str, Any] = {}
+        return self._context
+
+    @context.setter
+    def context(self, value: dict[str, Any]) -> None:
+        self._context = dict(value)
+
+    @property
+    def unique_id(self) -> str | None:
+        return self.context.get("unique_id")
+
+    async def async_set_unique_id(self, unique_id: str | None = None, *, raise_on_progress: bool = True):
+        self.context["unique_id"] = unique_id
+        if unique_id is None:
+            return None
+        for entry in self._async_current_entries(include_ignore=True):
+            if entry.unique_id == unique_id:
+                return entry
+        return None
+
+    def _async_current_entries(self, include_ignore: bool | None = False) -> list[Any]:
+        entries = self.hass.config_entries.async_entries(getattr(self, "_domain", None))
+        if include_ignore:
+            return list(entries)
+        return [e for e in entries if getattr(e, "source", None) != SOURCE_IGNORE]
+
+    def _abort_if_unique_id_configured(
+        self,
+        updates: dict[str, Any] | None = None,
+        reload_on_update: bool = True,
+        *,
+        error: str = "already_configured",
+    ) -> None:
+        """Как в HA: найти entry с тем же unique_id; при наличии — применить
+        updates к data, при изменении и reload_on_update запланировать reload,
+        поднять AbortFlow(error)."""
+        uid = self.unique_id
+        if uid is None:
+            return
+        for entry in self._async_current_entries(include_ignore=True):
+            if entry.unique_id != uid:
+                continue
+            if updates:
+                changed = any(entry.data.get(k) != v for k, v in updates.items())
+                if changed:
+                    self.hass.config_entries.async_update_entry(
+                        entry, data={**entry.data, **updates}
+                    )
+                    if reload_on_update:
+                        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            raise AbortFlow(error)
+
+    def _async_abort_entries_match(self, match_dict: dict[str, Any] | None = None) -> None:
+        """AbortFlow('already_configured'), если у какого-то entry data
+        содержит все пары match_dict."""
+        if not match_dict:
+            return
+        for entry in self._async_current_entries(include_ignore=False):
+            if all(entry.data.get(k) == v for k, v in match_dict.items()):
+                raise AbortFlow("already_configured")
+
+    def _get_entry_from_context(self):
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is None:
+            raise RuntimeError(f"config entry {self.context['entry_id']!r} not found")
+        return entry
+
+    def _get_reconfigure_entry(self):
+        return self._get_entry_from_context()
+
+    def _get_reauth_entry(self):
+        return self._get_entry_from_context()
+
+    def async_update_reload_and_abort(
+        self,
+        entry,
+        *,
+        unique_id: Any = _UNDEFINED,
+        title: Any = _UNDEFINED,
+        data: Any = _UNDEFINED,
+        data_updates: Any = _UNDEFINED,
+        options: Any = _UNDEFINED,
+        reason: str | None = None,
+        reload_even_if_entry_is_unchanged: bool = True,
+    ) -> dict[str, Any]:
+        if data_updates is not _UNDEFINED:
+            data = {**entry.data, **data_updates}
+        kwargs: dict[str, Any] = {}
+        if data is not _UNDEFINED:
+            kwargs["data"] = data
+        if options is not _UNDEFINED:
+            kwargs["options"] = options
+        if unique_id is not _UNDEFINED:
+            kwargs["unique_id"] = unique_id
+        if title is not _UNDEFINED:
+            kwargs["title"] = title
+        if kwargs:
+            self.hass.config_entries.async_update_entry(entry, **kwargs)
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        if reason is None:
+            reason = (
+                "reauth_successful"
+                if self.context.get("source") == "reauth"
+                else "reconfigure_successful"
+            )
+        return self.async_abort(reason=reason)
+
+
+class OptionsFlow(_FlowHandlerBase):
+    """Stub config_entries.OptionsFlow: config_entry присваивается тестом."""
+
+    @property
+    def config_entry(self):
+        return self._config_entry
+
+    @config_entry.setter
+    def config_entry(self, value) -> None:
+        self._config_entry = value
+
+
+# ── helpers.selector ─────────────────────────────────────────────────────
+
+class NumberSelectorMode(str, Enum):
+    BOX = "box"
+    SLIDER = "slider"
+
+
+class NumberSelectorConfig(dict):
+    """Как в HA — dict с известными ключами."""
+
+    def __init__(
+        self,
+        *,
+        min: float | None = None,
+        max: float | None = None,
+        step: float | None = None,
+        mode: Any = None,
+        unit_of_measurement: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            min=min, max=max, step=step, mode=mode,
+            unit_of_measurement=unit_of_measurement, **kwargs,
+        )
+
+
+class NumberSelector:
+    """Вызываемый валидатор: значение → float в границах, иначе ValueError.
+
+    voluptuous оборачивает ValueError в vol.Invalid внутри vol.All —
+    поведение совпадает с реальным NumberSelector."""
+
+    def __init__(self, config: NumberSelectorConfig | dict | None = None) -> None:
+        self.config = dict(config or {})
+
+    def __call__(self, value: Any) -> float:
+        val = float(value)
+        min_v = self.config.get("min")
+        max_v = self.config.get("max")
+        if min_v is not None and val < min_v:
+            raise ValueError(f"Value {val} is below minimum {min_v}")
+        if max_v is not None and val > max_v:
+            raise ValueError(f"Value {val} is above maximum {max_v}")
+        return val
 
 
 # ── helpers.device_registry ──────────────────────────────────────────────
@@ -578,8 +822,15 @@ def install_stubs() -> None:
         "homeassistant.config_entries",
         ConfigEntry=ConfigEntry,
         ConfigFlow=ConfigFlow,
+        ConfigFlowResult=FlowResult,
+        OptionsFlow=OptionsFlow,
+        SOURCE_IGNORE=SOURCE_IGNORE,
     )
-    _make_module("homeassistant.data_entry_flow", FlowResult=FlowResult)
+    _make_module(
+        "homeassistant.data_entry_flow",
+        FlowResult=FlowResult,
+        AbortFlow=AbortFlow,
+    )
 
     _make_module("homeassistant.helpers")
     _make_module(
@@ -607,6 +858,12 @@ def install_stubs() -> None:
         async_call_later=async_call_later,
     )
     _make_module("homeassistant.helpers.storage", Store=Store)
+    _make_module(
+        "homeassistant.helpers.selector",
+        NumberSelector=NumberSelector,
+        NumberSelectorConfig=NumberSelectorConfig,
+        NumberSelectorMode=NumberSelectorMode,
+    )
     _make_module("homeassistant.helpers.service_info")
     _make_module(
         "homeassistant.helpers.service_info.zeroconf",
@@ -637,7 +894,7 @@ def install_stubs() -> None:
         async_redact_data=async_redact_data,
     )
     # Создаём подмодуль issue_registry с правильными типами
-    issue_registry_mod = _make_module(
+    _make_module(
         "homeassistant.helpers.issue_registry",
         async_create_issue=async_create_issue,
         async_delete_issue=async_delete_issue,

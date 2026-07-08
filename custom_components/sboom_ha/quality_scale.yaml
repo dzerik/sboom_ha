@@ -11,9 +11,7 @@ rules:
   brands: done
   common-modules: done
   config-flow: done
-  config-flow-test-coverage:
-    status: todo
-    comment: Тесты config_flow ещё не покрывают reauth/reconfigure end-to-end.
+  config-flow-test-coverage: done
   dependency-transparency: done
   docs-actions: done
   docs-high-level-description: done

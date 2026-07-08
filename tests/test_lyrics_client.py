@@ -9,11 +9,10 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
-
 from sboom_ha.lyrics_client import (
     Lyrics,
     _parse_lrc,
@@ -22,7 +21,6 @@ from sboom_ha.lyrics_client import (
     lyrics_from_dict,
     lyrics_to_dict,
 )
-
 
 # ─────────────────── lyrics_to_dict / lyrics_from_dict ───────────────────
 
@@ -111,6 +109,41 @@ def test_parse_lrc_skips_invalid_lines():
     lrc = "Random non-LRC text\n[00:05.00]Valid\nAnother junk"
     timeline = _parse_lrc(lrc)
     assert timeline == [(5.0, "Valid")]
+
+
+def test_parse_lrc_multi_timestamp_line_expands_to_all_points():
+    """Регрессия: [00:10.00][01:30.00]Chorus — одна строка на несколько моментов.
+
+    Раньше терялось второе вхождение припева (или строка отбрасывалась целиком)."""
+    timeline = _parse_lrc("[00:10.00][01:30.00]Chorus")
+    assert timeline == [(10.0, "Chorus"), (90.0, "Chorus")]
+
+
+def test_parse_lrc_multi_timestamp_sorted_into_timeline():
+    """Развёрнутые точки multi-timestamp строки встают по времени среди остальных."""
+    lrc = "[00:10.00][01:30.00]Chorus\n[00:20.00]Verse"
+    timeline = _parse_lrc(lrc)
+    assert timeline == [(10.0, "Chorus"), (20.0, "Verse"), (90.0, "Chorus")]
+
+
+def test_parse_lrc_strips_word_tags():
+    """Регрессия: word-теги enhanced LRC (<00:12.34>) попадали в отрисованный текст."""
+    timeline = _parse_lrc("[00:12.00]<00:12.34>Hello <00:13.00>world")
+    assert timeline == [(12.0, "Hello world")]
+
+
+def test_parse_lrc_plain_lines_unchanged_by_multits_support():
+    """Обычные однотаймстампные строки работают как раньше."""
+    timeline = _parse_lrc("[00:01.00]one\n[00:02.00]two")
+    assert timeline == [(1.0, "one"), (2.0, "two")]
+
+
+def test_parse_lrc_timestamp_mid_line_is_not_a_stamp():
+    """Таймстампы учитываются только подряд в начале строки — [..] в середине это текст."""
+    timeline = _parse_lrc("[00:05.00]see [00:10.00] marker")
+    assert len(timeline) == 1
+    assert timeline[0][0] == 5.0
+    assert "[00:10.00]" in timeline[0][1]
 
 
 # ─────────────────────────── current_line ───────────────────────────
@@ -231,11 +264,13 @@ async def test_fetch_lyrics_falls_back_to_minimal_query_on_404():
         call_count += 1
         # Первая попытка (с album) — 404
         if call_count == 1:
-            resp = MagicMock(); resp.status = 404
+            resp = MagicMock()
+            resp.status = 404
             resp.json = AsyncMock(return_value=None)
         else:
             # Вторая попытка (без album) — успех
-            resp = MagicMock(); resp.status = 200
+            resp = MagicMock()
+            resp.status = 200
             resp.json = AsyncMock(return_value={
                 "plainLyrics": "found without album",
                 "syncedLyrics": None, "instrumental": False,

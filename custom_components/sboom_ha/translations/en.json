@@ -49,7 +49,6 @@
   "issues": {
     "speaker_unreachable": {
       "title": "{name} is unreachable",
-      "description": "Speaker has been offline for {minutes} minutes. Check the device power, network connection, and IP address. If the IP changed, press Fix below or use Settings → Devices & Services → SBoom → ⋮ → Reconfigure.",
       "fix_flow": {
         "step": {
           "init": {

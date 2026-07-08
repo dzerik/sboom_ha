@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from sboom_ha._parsers import parse_device_state, parse_state
 
-
 # ─────────────────────── parse_device_state ───────────────────────
 
 

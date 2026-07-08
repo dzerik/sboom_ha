@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .const import COVER_SIZE, ZVUK_IMAGE_CDN
@@ -36,7 +36,7 @@ def track_position(coordinator: SboomCoordinator) -> float | None:
             delta = time.monotonic() - track.received_monotonic
         elif track.position_ts_ms:
             delta = (
-                datetime.now(timezone.utc).timestamp() * 1000 - track.position_ts_ms
+                datetime.now(UTC).timestamp() * 1000 - track.position_ts_ms
             ) / 1000.0
         if delta is not None and 0 <= delta < _MAX_EXTRAPOLATION_SEC:
             speed = track.playback_speed or 1.0

@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 # ВАЖНО: stubs должны быть установлены ДО любого `from sboom_ha.*` импорта.
-from tests._ha_stubs import HomeAssistant, ConfigEntry, install_stubs
+from tests._ha_stubs import ConfigEntry, HomeAssistant, install_stubs
 
 install_stubs()
 

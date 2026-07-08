@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-
 from sboom_ha.lyrics_client import Lyrics
+
 from tests._fakes import build_coordinator
 
 

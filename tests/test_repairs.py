@@ -1,11 +1,11 @@
 """Тесты Repairs platform: issue создаётся при долгой недоступности, удаляется при reconnect."""
 from __future__ import annotations
 
-from tests._fakes import build_coordinator, make_state, make_track
-from tests._ha_stubs import _ISSUE_REGISTRY, _IssueSeverity
-
 from sboom_ha.const import DOMAIN
 from sboom_ha.coordinator import UNREACHABLE_ISSUE_THRESHOLD_SEC
+
+from tests._fakes import build_coordinator, make_state, make_track
+from tests._ha_stubs import _ISSUE_REGISTRY, _IssueSeverity
 
 
 def _issue_key(coord) -> tuple[str, str]:
@@ -106,6 +106,7 @@ def test_issue_carries_entry_id():
 
 from sboom_ha import repairs as repairs_mod  # noqa: E402
 from sboom_ha.const import CONF_HOST, CONF_PORT  # noqa: E402
+
 from tests._fakes import make_entry  # noqa: E402
 from tests._ha_stubs import HomeAssistant  # noqa: E402
 
@@ -189,7 +190,7 @@ async def test_fix_flow_keeps_device_id_unique_id(monkeypatch):
     """device_id-based unique_id (не host-based) при смене host НЕ трогается."""
     entry = make_entry(host="192.0.2.10")
     entry.unique_id = f"{DOMAIN}_test-device-id"
-    hass, flow = _build_flow(monkeypatch, entry=entry)
+    _hass, flow = _build_flow(monkeypatch, entry=entry)
 
     result = await flow.async_step_init({CONF_HOST: "192.0.2.99"})
 

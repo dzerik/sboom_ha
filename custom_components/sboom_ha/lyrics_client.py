@@ -106,7 +106,7 @@ async def _request_get(
                 _LOGGER.debug("lrclib HTTP %s for %r — %r", r.status, track, artist)
                 return None
             return await r.json()
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+    except (TimeoutError, aiohttp.ClientError) as exc:
         _LOGGER.debug("lrclib network err: %s", exc.__class__.__name__)
         return None
 

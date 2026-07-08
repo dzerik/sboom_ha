@@ -11,14 +11,23 @@ from __future__ import annotations
 import io
 
 from PIL import Image
-
 from sboom_ha.image_render import (
     HEIGHT,
     WIDTH,
+    _blur_bg_cached,
+    _make_blur_bg,
     draw_blank,
     draw_cover_yandex,
     draw_lyrics_with_cover,
+    resize_jpeg,
 )
+
+
+def _make_cover(size: int = 50, color=(200, 30, 30)) -> bytes:
+    """Маленький настоящий JPEG для теста blur-фона/караоке."""
+    buf = io.BytesIO()
+    Image.new("RGB", (size, size), color).save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def _is_valid_jpeg(data: bytes) -> bool:
@@ -110,3 +119,65 @@ def test_draw_cover_yandex_handles_all_none():
     """Полностью пустой track (только что подключились) — тоже рендеримый кадр."""
     out = draw_cover_yandex(cover=None, title=None, artist=None)
     assert _is_valid_jpeg(out)
+
+
+# ─────────────────────── караоке-заливка (line_progress) ───────────────────────
+
+def test_karaoke_fill_actually_changes_frame():
+    """Регрессия: заливка пропетой части должна реально рисоваться.
+
+    Кадр с line_progress=0.5 обязан отличаться и от статичного (None),
+    и от заливки в нуле (0.0) — иначе караоке-режим визуально мёртв."""
+    cover = _make_cover()
+    kwargs = dict(
+        cover=cover, current="Karaoke test line here", next_line="next line",
+        title="T", artist="A", progress=0.3, position_sec=30.0, duration_sec=100.0,
+    )
+    half = draw_lyrics_with_cover(line_progress=0.5, **kwargs)
+    static = draw_lyrics_with_cover(line_progress=None, **kwargs)
+    zero = draw_lyrics_with_cover(line_progress=0.0, **kwargs)
+    assert _is_valid_jpeg(half)
+    assert half != static, "line_progress=0.5 не отличился от статичного кадра"
+    assert half != zero, "line_progress=0.5 не отличился от заливки 0.0"
+
+
+# ─────────────────────── blur-фон: кэш ───────────────────────
+
+def test_blur_bg_cached_returns_same_object_for_equal_bytes():
+    """Кэш по значению bytes: два равных (но разных) объекта → один Image."""
+    cover = _make_cover(color=(10, 120, 40))
+    a = _blur_bg_cached(cover)
+    b = _blur_bg_cached(bytes(cover))  # равный, но другой объект bytes
+    assert a is b, "lru_cache должен отдавать один и тот же Image для одинаковой обложки"
+
+
+def test_make_blur_bg_returns_fresh_copies():
+    """Регрессия: кэшированный Image нельзя отдавать под ImageDraw —
+    рисование мутировало бы кэш и «пачкало» все последующие кадры."""
+    cover = _make_cover(color=(40, 40, 200))
+    cached = _blur_bg_cached(cover)
+    c1 = _make_blur_bg(cover)
+    c2 = _make_blur_bg(cover)
+    assert c1 is not c2
+    assert c1 is not cached and c2 is not cached
+    # копия эквивалентна кэшу по содержимому
+    assert c1.tobytes() == cached.tobytes()
+
+
+# ─────────────────────── resize_jpeg ───────────────────────
+
+def test_resize_jpeg_shrinks_to_requested_width():
+    out = resize_jpeg(draw_blank(), 320, None)
+    img = Image.open(io.BytesIO(out))
+    assert img.size == (320, 180)  # aspect 16:9 сохранён
+
+
+def test_resize_jpeg_shrinks_to_requested_height():
+    out = resize_jpeg(draw_blank(), None, 90)
+    img = Image.open(io.BytesIO(out))
+    assert img.size == (160, 90)
+
+
+def test_resize_jpeg_noop_without_dimensions():
+    src = draw_blank()
+    assert resize_jpeg(src, None, None) is src

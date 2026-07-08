@@ -106,7 +106,7 @@ class SboomLyricsCamera(SboomEntity, Camera):
         pos = lyrics_position(self.coordinator)
         if pos is None:
             return None
-        idx, cur, nxt, frac = _timeline_at(lyrics.timeline, pos)
+        _idx, cur, nxt, frac = _timeline_at(lyrics.timeline, pos)
         if cur is None and nxt is None:
             return None
         cover_raw = await self._fetch_cover_raw(track)
@@ -265,7 +265,7 @@ class SboomLyricsCamera(SboomEntity, Camera):
                     self._cover_cache_track = track.track_id
                     self._cover_raw = raw
                     return raw
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, aiohttp.ClientError) as exc:
             _LOGGER.debug("cover fetch failed: %s", exc)
         self._cover_cache_track = track.track_id
         self._cover_raw = None

@@ -12,7 +12,9 @@ from homeassistant import config_entries
 try:  # HA 2024.4+ — актуальный тип результата config flow
     from homeassistant.config_entries import ConfigFlowResult
 except ImportError:  # legacy
-    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
+    from homeassistant.data_entry_flow import (
+        FlowResult as ConfigFlowResult,  # type: ignore[assignment]
+    )
 
 try:  # HA 2023.12+
     from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -280,7 +282,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             finally:
                 try:
                     await client.close()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _LOGGER.debug("client.close in reconfigure finally failed", exc_info=True)
 
         return self.async_show_form(
@@ -441,7 +443,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if client is not None:
                 try:
                     await client.close()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _LOGGER.debug("client.close in pair finally failed", exc_info=True)
         return token, errors
 

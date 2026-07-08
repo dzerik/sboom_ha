@@ -26,23 +26,25 @@ from .const import (
     CONF_PORT,
     DEFAULT_AVAILABILITY_THRESHOLD,
     DEFAULT_KEEPALIVE_INTERVAL,
-    DEFAULT_PORT,
+    DEFAULT_LYRICS_ENABLED,
     DEFAULT_LYRICS_OFFSET,
+    DEFAULT_PORT,
     DEFAULT_VOLUME_POLL_INTERVAL,
     DOMAIN,
     ENVELOPE_FIELD_REQUEST_DATA,
-    DEFAULT_LYRICS_ENABLED,
     OP_GET_META_DATA,
     OP_GET_STATE,
-    OPT_LYRICS_OFFSET,
     OPT_AVAILABILITY_THRESHOLD,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
+    OPT_LYRICS_OFFSET,
     OPT_VOLUME_POLL_INTERVAL,
     POLL_FAILURES_BEFORE_RECONNECT,
     RECONNECT_BACKOFF_SEC,
     STABLE_SESSION_SEC,
 )
+from .lyrics_client import Lyrics
+from .lyrics_manager import LyricsManager
 
 # Event types для HA event bus.
 EVENT_TRACK_CHANGED = "sboom_track_changed"
@@ -52,8 +54,6 @@ EVENT_CONNECTION_CHANGED = "sboom_connection_changed"
 
 # Issue: колонка недоступна больше N секунд → создаём info-issue в Repairs.
 UNREACHABLE_ISSUE_THRESHOLD_SEC = 300  # 5 минут
-from .lyrics_client import Lyrics
-from .lyrics_manager import LyricsManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         _LOGGER.debug("WS-обрыв замечен listen-loop'ом — reconnect")
                         break
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass  # keepalive-интервал прошёл штатно
                     try:
                         await self.client.keep_alive()

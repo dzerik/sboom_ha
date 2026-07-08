@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -120,9 +120,9 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
         if not track:
             return None
         if track.received_ts is not None:
-            return datetime.fromtimestamp(track.received_ts, tz=timezone.utc)
+            return datetime.fromtimestamp(track.received_ts, tz=UTC)
         if track.position_ts_ms is not None:  # fallback для старых данных
-            return datetime.fromtimestamp(track.position_ts_ms / 1000, tz=timezone.utc)
+            return datetime.fromtimestamp(track.position_ts_ms / 1000, tz=UTC)
         return None
 
     @property

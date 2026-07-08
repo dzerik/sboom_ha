@@ -10,13 +10,10 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from sboom_ha.api import TrackInfo
 from sboom_ha.helpers import _MAX_EXTRAPOLATION_SEC, cover_url, track_position
-
 
 # ─────────────────────────── cover_url ───────────────────────────
 
@@ -82,7 +79,7 @@ class _Coord:
 
 
 def _now_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
+    return int(datetime.now(UTC).timestamp() * 1000)
 
 
 def test_track_position_none_when_no_track():

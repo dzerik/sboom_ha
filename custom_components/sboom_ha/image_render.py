@@ -38,7 +38,7 @@ def _draw_text(
     line_width: int = 20,
 ) -> None:
     """Многострочный текст с автопереносом и smart-anchor."""
-    lines = re.findall(r"(.{1,%d})(?:\s|$)" % line_width, text)
+    lines = re.findall(rf"(.{{1,{line_width}}})(?:\s|$)", text)
     if (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4):
         _draw_text(ctx, text, box, anchor, fill, font_size - 10, line_width + 3)
         return

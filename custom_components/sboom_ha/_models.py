@@ -2,33 +2,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class TrackInfo:
-    title: Optional[str] = None
+    title: str | None = None
     artists: list[str] = field(default_factory=list)
-    album: Optional[str] = None
-    track_id: Optional[str] = None
-    release_id: Optional[str] = None
+    album: str | None = None
+    track_id: str | None = None
+    release_id: str | None = None
     artist_ids: list[str] = field(default_factory=list)
-    playlist_title: Optional[str] = None
-    provider: Optional[str] = None
-    duration_sec: Optional[int] = None
-    position_sec: Optional[int] = None
-    position_ts_ms: Optional[int] = None  # timestamp когда position был зафиксирован
+    playlist_title: str | None = None
+    provider: str | None = None
+    duration_sec: int | None = None
+    position_sec: int | None = None
+    position_ts_ms: int | None = None  # timestamp когда position был зафиксирован
     playing: bool = False
     shuffle: bool = False
-    repeat: Optional[str] = None
+    repeat: str | None = None
     explicit: bool = False
     liked: bool = False
-    playback_speed: Optional[float] = None  # playbackSpeedRate из метаданных (0.5–2.0)
+    playback_speed: float | None = None  # playbackSpeedRate из метаданных (0.5–2.0)
     # Момент получения данных на стороне HA. monotonic — для экстраполяции
     # позиции (часы колонки могут расходиться с часами HA, см. helpers.py),
     # unix-время — для media_position_updated_at.
-    received_monotonic: Optional[float] = None
-    received_ts: Optional[float] = None
+    received_monotonic: float | None = None
+    received_ts: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -36,32 +36,32 @@ class TrackInfo:
 class DeviceState:
     """Подсистемы устройства из GET_STATE (op=12), кроме volume/muted."""
 
-    led_brightness: Optional[int] = None       # capabilities_state.led_display.brightness
-    led_on: Optional[bool] = None              # capabilities_state.led_display.turned_on
-    alarms_count: Optional[int] = None         # alarm.alarmsCounter / len(alarm.alarms)
+    led_brightness: int | None = None       # capabilities_state.led_display.brightness
+    led_on: bool | None = None              # capabilities_state.led_display.turned_on
+    alarms_count: int | None = None         # alarm.alarmsCounter / len(alarm.alarms)
     alarms: list[Any] = field(default_factory=list)
-    timers_count: Optional[int] = None         # len(alarm.timers)
+    timers_count: int | None = None         # len(alarm.timers)
     timers: list[Any] = field(default_factory=list)
-    sleep_state: Optional[str] = None          # deviceSleep.systemState ("working" = активна)
-    stereo_pair_active: Optional[bool] = None  # multiroom.stereoPair.active
-    multiroom_mode: Optional[str] = None       # multiroom.mode
-    active_app: Optional[str] = None           # background_apps[0].app_info.systemName
-    assistant_character: Optional[str] = None  # assistant.character
-    is_subscription_device: Optional[bool] = None  # subscrDeviceInfo.isSubscrDevice
-    network_type: Optional[str] = None         # network.connection_type
-    home_security: Optional[bool] = None       # homeSecurity.enabled
-    in_morning_show: Optional[bool] = None     # morning_show.in_show
+    sleep_state: str | None = None          # deviceSleep.systemState ("working" = активна)
+    stereo_pair_active: bool | None = None  # multiroom.stereoPair.active
+    multiroom_mode: str | None = None       # multiroom.mode
+    active_app: str | None = None           # background_apps[0].app_info.systemName
+    assistant_character: str | None = None  # assistant.character
+    is_subscription_device: bool | None = None  # subscrDeviceInfo.isSubscrDevice
+    network_type: str | None = None         # network.connection_type
+    home_security: bool | None = None       # homeSecurity.enabled
+    in_morning_show: bool | None = None     # morning_show.in_show
 
 
 @dataclass
 class SpeakerState:
     # None = «не пришло в этом ответе» — coordinator домердживает из прежнего
     # state, чтобы частичный/битый push не обнулял громкость в UI.
-    volume_percent: Optional[int] = None
-    muted: Optional[bool] = None
-    track: Optional[TrackInfo] = None
-    raw_state_json: Optional[str] = None
-    device: Optional[DeviceState] = None
+    volume_percent: int | None = None
+    muted: bool | None = None
+    track: TrackInfo | None = None
+    raw_state_json: str | None = None
+    device: DeviceState | None = None
 
 
 @dataclass
@@ -78,5 +78,5 @@ class BluetoothDevice:
 
     mac: str
     name: str = ""
-    connected: Optional[bool] = None  # для спаренных устройств
-    rssi: Optional[int] = None        # уровень сигнала для найденных в скане
+    connected: bool | None = None  # для спаренных устройств
+    rssi: int | None = None        # уровень сигнала для найденных в скане

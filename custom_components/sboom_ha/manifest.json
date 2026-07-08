@@ -8,9 +8,9 @@
   "integration_type": "device",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/dzerik/sboom_ha/issues",
-  "quality_scale": "silver",
+  "quality_scale": "bronze",
   "requirements": ["websockets>=13.0", "Pillow>=10.0"],
-  "version": "0.12.0",
+  "version": "0.13.0",
   "zeroconf": [
     { "type": "_staros._tcp.local." }
   ]

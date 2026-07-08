@@ -5,7 +5,6 @@ import struct
 
 from sboom_ha._tlv import decode, decode_repeated, field, varint
 
-
 # ─────────────────────── varint ───────────────────────
 
 def test_varint_zero():

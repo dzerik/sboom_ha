@@ -259,7 +259,7 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
     # ENUM: набор состояний определяется нашим же кодом (native_value ниже) —
     # HA получает переводимые состояния и валидацию значений.
     _attr_device_class = "enum"  # строка == SensorDeviceClass.ENUM
-    _attr_options = ["no_track", "loading", "available", "instrumental", "not_found"]
+    _attr_options: list[str] = ["no_track", "loading", "available", "instrumental", "not_found"]  # noqa: RUF012 — контракт HA: list
 
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)

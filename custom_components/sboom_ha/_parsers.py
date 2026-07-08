@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 from ._models import BluetoothDevice, DeviceState, QueueTrack, SpeakerState, TrackInfo
 from ._tlv import decode as _decode_tlv
@@ -17,7 +17,7 @@ from ._tlv import decode_repeated as _decode_repeated
 _LOGGER = logging.getLogger(__name__)
 
 
-def _extract_json_object(s: str, start: int) -> Optional[str]:
+def _extract_json_object(s: str, start: int) -> str | None:
     """Сбалансированный JSON-объект, начиная с `{` на позиции start (учёт строк)."""
     depth = 0
     in_str = False
@@ -107,7 +107,7 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     return ds
 
 
-def parse_state(raw: bytes) -> Optional[SpeakerState]:
+def parse_state(raw: bytes) -> SpeakerState | None:
     """Парсит GET_STATE: volume/muted + подсистемы устройства (.device).
 
     Стратегия: извлечь сбалансированный JSON-объект и распарсить. Если JSON
@@ -123,7 +123,7 @@ def parse_state(raw: bytes) -> Optional[SpeakerState]:
     idx = s.find("{")
 
     obj = _extract_json_object(s, idx) if idx >= 0 else None
-    data: Optional[dict[str, Any]] = None
+    data: dict[str, Any] | None = None
     if obj is not None:
         try:
             parsed = json.loads(obj)
@@ -172,7 +172,7 @@ def _scan_open_brace_backward(s: str, pos: int) -> int:
     return -1
 
 
-def _find_track_json(s: str) -> Optional[tuple[dict[str, Any], int]]:
+def _find_track_json(s: str) -> tuple[dict[str, Any], int] | None:
     """Ищет JSON-объект, содержащий `"trackId":"NNN"`.
 
     Стратегия: regex по trackId → backward-скан к открывающей `{` →
@@ -285,7 +285,7 @@ def _parse_playback_status(
             ti.playback_speed = None
 
 
-def parse_track(raw: bytes) -> Optional[TrackInfo]:
+def parse_track(raw: bytes) -> TrackInfo | None:
     """Парсит трек из payload. Поддерживает push-формат и state-обёртку.
 
     Два наблюдаемых формата:

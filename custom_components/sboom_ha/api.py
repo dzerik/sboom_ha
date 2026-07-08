@@ -11,7 +11,8 @@ import inspect
 import logging
 import ssl
 import uuid
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import websockets
 
@@ -26,8 +27,8 @@ from ._tlv import field as _field
 from .const import (
     DEFAULT_PORT,
     DEFAULT_USER_AGENT,
-    WS_PING_INTERVAL_SEC,
-    WS_PING_TIMEOUT_SEC,
+    ENVELOPE_FIELD_MSG_ID,
+    ENVELOPE_FIELD_REQUEST_DATA,
     MEDIA_CMD_DISLIKE,
     MEDIA_CMD_LIKE,
     MEDIA_CMD_MUTE,
@@ -43,22 +44,20 @@ from .const import (
     MEDIA_CMD_SHUFFLE_OFF,
     MEDIA_CMD_SHUFFLE_ON,
     MEDIA_CMD_UNMUTE,
-    OP_GET_META_DATA,
-    OP_GET_PLAYING_QUEUE,
-    OP_GET_STATE,
-    OP_KEEP_ALIVE,
-    OP_MEDIA_COMMAND,
     OP_BT_DEVICE_COMMAND,
     OP_BT_DISCOVERABLE,
     OP_FIND_REMOTE,
+    OP_GET_META_DATA,
     OP_GET_PAIRED_BT,
+    OP_GET_PLAYING_QUEUE,
     OP_GET_SCANNED_BT,
+    OP_GET_STATE,
+    OP_KEEP_ALIVE,
+    OP_MEDIA_COMMAND,
     OP_PIN_CONNECT,
     OP_SET_PLAYBACK_SPEED,
     OP_SET_TRACK_POS,
     OP_SET_VOLUME,
-    ENVELOPE_FIELD_MSG_ID,
-    ENVELOPE_FIELD_REQUEST_DATA,
     PAIR_BUTTON_TIMEOUT_SEC,
     PAIR_CONFIRM_OK,
     PAIR_CONFIRM_REJECTED,
@@ -70,6 +69,8 @@ from .const import (
     PLAYBACK_SPEED_MIN,
     REPEAT_TO_CANONICAL,
     TOKEN_TYPE_PIN_AUTH,
+    WS_PING_INTERVAL_SEC,
+    WS_PING_TIMEOUT_SEC,
 )
 
 
@@ -116,10 +117,10 @@ class SberSpeakerClient:
         self,
         host: str,
         port: int = DEFAULT_PORT,
-        client_id: Optional[str] = None,
+        client_id: str | None = None,
         client_name: str = "Home Assistant",
-        pin_access_token: Optional[str] = None,
-        on_event: Optional[Callable[[bytes, dict[int, Any]], Awaitable[None]]] = None,
+        pin_access_token: str | None = None,
+        on_event: Callable[[bytes, dict[int, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -128,8 +129,8 @@ class SberSpeakerClient:
         self.pin_access_token = pin_access_token
         self._on_event = on_event
 
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
-        self._listener_task: Optional[asyncio.Task] = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._listener_task: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         # Выставляется при выходе из _listen_loop (обрыв связи). Супервизор
@@ -232,7 +233,7 @@ class SberSpeakerClient:
             remain = deadline - loop.time()
             try:
                 resp = await asyncio.wait_for(self._ws.recv(), timeout=remain)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _LOGGER.warning("pair: timed out waiting for pair-confirm response")
                 break
             msg_idx += 1
@@ -283,12 +284,12 @@ class SberSpeakerClient:
 
     # ────────────────────────────── high-level commands ──────────────────────────────
 
-    async def get_state(self) -> Optional[SpeakerState]:
+    async def get_state(self) -> SpeakerState | None:
         """None — колонка ответила, но payload не распарсился (state сохраняем)."""
         resp = await self._request_response(_field(OP_GET_STATE, 2, _field(1, 2, b"")))
         return self._extract_state(resp)
 
-    async def get_metadata(self) -> Optional[TrackInfo]:
+    async def get_metadata(self) -> TrackInfo | None:
         resp = await self._request_response(_field(OP_GET_META_DATA, 2, _field(1, 2, b"")))
         return self._extract_track(resp)
 
@@ -482,12 +483,12 @@ class SberSpeakerClient:
     # ────────────────────────────── parsers ──────────────────────────────
 
     @staticmethod
-    def parse_state(raw: bytes) -> Optional[SpeakerState]:
+    def parse_state(raw: bytes) -> SpeakerState | None:
         """Public wrapper — делегирует в _parsers.parse_state."""
         return _parse_state(raw)
 
     @staticmethod
-    def parse_track(raw: bytes) -> Optional[TrackInfo]:
+    def parse_track(raw: bytes) -> TrackInfo | None:
         """Public wrapper — делегирует в _parsers.parse_track."""
         return _parse_track(raw)
 
