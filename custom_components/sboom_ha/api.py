@@ -281,7 +281,8 @@ class SberSpeakerClient:
 
     # ────────────────────────────── high-level commands ──────────────────────────────
 
-    async def get_state(self) -> SpeakerState:
+    async def get_state(self) -> Optional[SpeakerState]:
+        """None — колонка ответила, но payload не распарсился (state сохраняем)."""
         resp = await self._request_response(_field(OP_GET_STATE, 2, _field(1, 2, b"")))
         return self._extract_state(resp)
 
@@ -480,7 +481,7 @@ class SberSpeakerClient:
     # ────────────────────────────── parsers ──────────────────────────────
 
     @staticmethod
-    def parse_state(raw: bytes) -> SpeakerState:
+    def parse_state(raw: bytes) -> Optional[SpeakerState]:
         """Public wrapper — делегирует в _parsers.parse_state."""
         return _parse_state(raw)
 

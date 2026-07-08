@@ -107,11 +107,16 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     return ds
 
 
-def parse_state(raw: bytes) -> SpeakerState:
+def parse_state(raw: bytes) -> Optional[SpeakerState]:
     """Парсит GET_STATE: volume/muted + подсистемы устройства (.device).
 
     Стратегия: извлечь сбалансированный JSON-объект и распарсить. Если JSON
     битый/частичный — fallback на regex по volume (старое поведение), device=None.
+
+    Возвращает None при полном провале разбора (ни JSON, ни volume-regex) —
+    чтобы вызывающий НЕ затирал валидный прежний state дефолтами. Поля
+    volume_percent/muted остаются None, если в payload их не было; merge с
+    прежним состоянием делает coordinator.
     """
     st = SpeakerState()
     s = raw.decode("utf-8", errors="ignore")
@@ -143,9 +148,11 @@ def parse_state(raw: bytes) -> SpeakerState:
     if m:
         st.muted = m.group(1) == "true"
         st.volume_percent = int(m.group(2))
-    if idx >= 0:
-        st.raw_state_json = s[idx:]
-    return st
+        if idx >= 0:
+            st.raw_state_json = s[idx:]
+        return st
+
+    return None
 
 
 def parse_track(raw: bytes) -> Optional[TrackInfo]:

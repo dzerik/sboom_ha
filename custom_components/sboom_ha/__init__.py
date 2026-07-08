@@ -32,7 +32,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        # Иначе утекли бы supervisor-task и открытый WS: HA повторит setup,
+        # а старый координатор продолжил бы жить без владельца.
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        await coordinator.async_stop()
+        raise
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     # Регистрация custom services (идемпотентно — несколько entries безопасны).
@@ -41,11 +48,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Очистка при удалении."""
-    coordinator: SboomCoordinator | None = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if coordinator is not None:
-        await coordinator.async_stop()
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Очистка при удалении.
+
+    Порядок стандартный для HA: сначала выгружаем платформы (их entities ещё
+    могут обращаться к координатору), и только при успехе гасим координатор.
+    Иначе неудачная выгрузка платформ оставила бы entry в состоянии loaded
+    с уже остановленным координатором.
+    """
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        coordinator: SboomCoordinator | None = hass.data.get(DOMAIN, {}).pop(
+            entry.entry_id, None
+        )
+        if coordinator is not None:
+            await coordinator.async_stop()
+    return unload_ok
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

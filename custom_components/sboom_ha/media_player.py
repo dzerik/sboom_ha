@@ -68,7 +68,7 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
     @property
     def volume_level(self) -> float | None:
         st = self.coordinator.state
-        if not st:
+        if not st or st.volume_percent is None:
             return None
         return st.volume_percent / 100.0
 
@@ -110,11 +110,19 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
 
     @property
     def media_position_updated_at(self) -> datetime | None:
-        """Когда позиция была зафиксирована (UTC). HA сам инкрементит её со временем."""
+        """Когда позиция была зафиксирована (UTC). HA сам инкрементит её со временем.
+
+        Берём момент получения данных на стороне HA, а не timestamp часов
+        колонки: рассинхрон часов ломал бы позицию во frontend.
+        """
         track = self.coordinator.track
-        if not track or track.position_ts_ms is None:
+        if not track:
             return None
-        return datetime.fromtimestamp(track.position_ts_ms / 1000, tz=timezone.utc)
+        if track.received_ts is not None:
+            return datetime.fromtimestamp(track.received_ts, tz=timezone.utc)
+        if track.position_ts_ms is not None:  # fallback для старых данных
+            return datetime.fromtimestamp(track.position_ts_ms / 1000, tz=timezone.utc)
+        return None
 
     @property
     def app_name(self) -> str | None:
@@ -169,7 +177,8 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
-        cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
+        st = self.coordinator.state
+        cur = st.volume_percent if st and st.volume_percent is not None else 50
         target = min(100, cur + 5)
         await self._run_command(
             self.coordinator.client.set_volume(target), action="volume up"
@@ -180,7 +189,8 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
-        cur = self.coordinator.state.volume_percent if self.coordinator.state else 50
+        st = self.coordinator.state
+        cur = st.volume_percent if st and st.volume_percent is not None else 50
         target = max(0, cur - 5)
         await self._run_command(
             self.coordinator.client.set_volume(target), action="volume down"

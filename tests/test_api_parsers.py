@@ -150,11 +150,22 @@ def test_parse_state_handles_muted_true():
     assert state.volume_percent == 0
 
 
-def test_parse_state_returns_defaults_when_no_volume_info():
-    """Если в payload нет volume-блока — state с default-значениями (None), не падение."""
-    state = SberSpeakerClient.parse_state(b"no volume here")
-    # По дефолту volume_percent и muted могут быть None или default int — главное чтобы не падало
+def test_parse_state_returns_none_on_unparseable_payload():
+    """Полностью нераспознанный payload → None, а НЕ state с нулями.
+
+    Регрессия из ревью: раньше возвращался SpeakerState(volume=0, muted=False),
+    и один битый push обнулял громкость и все device-сенсоры в UI.
+    """
+    assert SberSpeakerClient.parse_state(b"no volume here") is None
+
+
+def test_parse_state_json_without_volume_keeps_fields_unknown():
+    """JSON распознан, но volume-блока нет → volume/muted остаются None
+    (coordinator домерджит их из прежнего state), а не обнуляются."""
+    state = SberSpeakerClient.parse_state(b'{"alarm":{"alarmsCounter":0}}')
     assert state is not None
+    assert state.volume_percent is None
+    assert state.muted is None
 
 
 def test_parse_state_keeps_raw_json_chunk():

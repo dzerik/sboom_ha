@@ -24,6 +24,11 @@ class TrackInfo:
     explicit: bool = False
     liked: bool = False
     playback_speed: Optional[float] = None  # playbackSpeedRate из метаданных (0.5–2.0)
+    # Момент получения данных на стороне HA. monotonic — для экстраполяции
+    # позиции (часы колонки могут расходиться с часами HA, см. helpers.py),
+    # unix-время — для media_position_updated_at.
+    received_monotonic: Optional[float] = None
+    received_ts: Optional[float] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -50,8 +55,10 @@ class DeviceState:
 
 @dataclass
 class SpeakerState:
-    volume_percent: int = 0
-    muted: bool = False
+    # None = «не пришло в этом ответе» — coordinator домердживает из прежнего
+    # state, чтобы частичный/битый push не обнулял громкость в UI.
+    volume_percent: Optional[int] = None
+    muted: Optional[bool] = None
     track: Optional[TrackInfo] = None
     raw_state_json: Optional[str] = None
     device: Optional[DeviceState] = None

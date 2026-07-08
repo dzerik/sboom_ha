@@ -164,7 +164,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Строгая проверка: соединение считается рабочим только после первого
         # успешного запроса. Иначе колонка, принимающая WS, но не отвечающая
         # (например, отозванный токен), выглядела бы «подключённой».
-        self.state = await self.client.get_state()
+        self.state = self._merge_state(await self.client.get_state())
         self._poll_failures = 0
         self._set_connected(True)
         _LOGGER.debug("connected to %s", self.client.host)
@@ -298,7 +298,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "found" if result.plain or result.synced
                 else ("instrumental" if result.instrumental else "not_found"),
             )
-            self.async_set_updated_data({"state": self.state, "track": self.track})
+            # Только перерисовка entities: state/track не менялись, а
+            # async_set_updated_data сдвинул бы volume-poll и отменил
+            # pending request_refresh.
+            self.async_update_listeners()
         finally:
             self._lyrics_inflight.discard(track_id)
 
@@ -350,12 +353,41 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # ─────────────────────── data handlers ───────────────────────
 
-    async def _refresh_state_and_track(self) -> None:
+    def _merge_state(self, new: SpeakerState | None) -> SpeakerState | None:
+        """Домердживает недостающие поля нового state из прежнего.
+
+        Частичный или битый payload (parse_state вернул None либо state без
+        volume-блока) не должен обнулять громкость/mute/device-сенсоры в UI.
+        """
+        if new is None:
+            return self.state
+        old = self.state
+        if old is not None:
+            if new.volume_percent is None:
+                new.volume_percent = old.volume_percent
+            if new.muted is None:
+                new.muted = old.muted
+            if new.device is None:
+                new.device = old.device
+        return new
+
+    def _stamp_track(self, track: TrackInfo | None) -> TrackInfo | None:
+        """Помечает трек временем получения на стороне HA.
+
+        monotonic — база экстраполяции позиции (часы колонки могут расходиться
+        с часами HA), unix-время — для media_position_updated_at.
+        """
+        if track is not None:
+            track.received_monotonic = time.monotonic()
+            track.received_ts = time.time()
+        return track
+
+    async def _refresh_state_and_track(self, *, notify: bool = True) -> None:
         prev_track = self.track
         prev_state = self.state
         poll_ok = False
         try:
-            self.state = await self.client.get_state()
+            self.state = self._merge_state(await self.client.get_state())
             poll_ok = True
             _LOGGER.debug("get_state -> volume=%s muted=%s",
                           self.state.volume_percent if self.state else "?",
@@ -364,7 +396,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Обрыв в процессе poll'а — штатно, супервизор реконнектит.
             _LOGGER.debug("get_state failed: %s", exc)
         try:
-            self.track = await self.client.get_metadata()
+            self.track = self._stamp_track(await self.client.get_metadata())
             poll_ok = True
             self._maybe_fetch_lyrics()
             if self.track:
@@ -401,7 +433,12 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.client.close()
 
         self._fire_change_events(prev_track, prev_state)
-        self.async_set_updated_data({"state": self.state, "track": self.track})
+        # notify=False, когда вызывает _async_update_data: штатный цикл
+        # координатора сам уведомит listeners после return. Вызов
+        # async_set_updated_data изнутри цикла обновления давал бы двойную
+        # перерисовку всех entities на каждый poll.
+        if notify:
+            self.async_set_updated_data({"state": self.state, "track": self.track})
 
     async def _handle_event(self, raw: bytes, parsed: dict[int, Any]) -> None:
         """Колонка отправила unsolicited / push message — обновляем state/track."""
@@ -413,7 +450,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         changed = False
         if 10 in req_data:    # MetaData update
             try:
-                new_track = self.client.parse_track(raw)
+                new_track = self._stamp_track(self.client.parse_track(raw))
                 if new_track is not None:
                     self.track = new_track
                     self._maybe_fetch_lyrics()
@@ -422,13 +459,20 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.exception("metadata push parse failed")
         if 12 in req_data:    # State update
             try:
-                self.state = self.client.parse_state(raw)
-                changed = True
+                new_state = self.client.parse_state(raw)
+                if new_state is not None:
+                    self.state = self._merge_state(new_state)
+                    changed = True
             except Exception:
                 _LOGGER.exception("state push parse failed")
         if changed:
             self._fire_change_events(prev_track, prev_state)
-            self.async_set_updated_data({"state": self.state, "track": self.track})
+            # Прямое обновление + update_listeners вместо async_set_updated_data:
+            # последний отменяет pending request_refresh (подтверждение команд)
+            # и переносит volume-poll на +interval при каждом push — при
+            # активном воспроизведении громкость старела бы неограниченно.
+            self.data = {"state": self.state, "track": self.track}
+            self.async_update_listeners()
 
     # ─────────────────────── event bus ───────────────────────
 
@@ -453,6 +497,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.client.host,
                 )
             self._unreachable_since = time.monotonic()
+        if self._stopping:
+            # Штатный unload/reload — не событие для автоматизаций
+            # и перерисовывать уже нечего.
+            return
         self.hass.bus.async_fire(EVENT_CONNECTION_CHANGED, {
             **self._event_payload_base(),
             "connected": connected,
@@ -543,5 +591,5 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # сокет. Супервизор уже переподключается — отдаём последний known state.
         if self.client.disconnected.is_set():
             return {"state": self.state, "track": self.track}
-        await self._refresh_state_and_track()
+        await self._refresh_state_and_track(notify=False)
         return {"state": self.state, "track": self.track}
