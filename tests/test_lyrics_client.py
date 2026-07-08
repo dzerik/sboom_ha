@@ -449,3 +449,25 @@ async def test_chain_prefers_netease_synced_over_lrclib_plain():
     assert result is not None
     assert result.source == "netease"
     assert result.timeline is not None
+
+
+@pytest.mark.asyncio
+async def test_netease_strips_credit_lines():
+    """Реальный кейс (Летов, «Всё идёт по плану»): NetEase отдаёт LRC со
+    служебной строкой «[00:00.00] 作曲 : Егор Летов» — кредит композитора,
+    а не текст. Без фильтра он висел бы в караоке до первой настоящей строки.
+    Фильтруется сам synced (персистится в Store и пересобирается в timeline)."""
+    lyric = {"lrc": {"lyric":
+        "[00:00.00] 作曲 : Егор Летов\n"
+        "[00:12.00]Границы ключ переломлен пополам\n"
+        "[00:15.00]А наш батюшка Ленин совсем усоп"}}
+    session, _ = _routed_session({
+        "lrclib.net": (404, None),
+        "music.163.com/api/search": (200, _NETEASE_SEARCH_OK),
+        "music.163.com/api/song/lyric": (200, lyric),
+    })
+    result = await fetch_lyrics(session, "Track", "Artist", duration_sec=200)
+    assert result is not None and result.source == "netease"
+    assert result.timeline[0] == (12.0, "Границы ключ переломлен пополам")
+    assert "作曲" not in (result.synced or "")
+    assert "作曲" not in (result.plain or "")

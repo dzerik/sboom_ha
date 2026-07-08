@@ -23,6 +23,11 @@ _NETEASE_HEADERS = {
 }
 # Допустимое расхождение длительности при матчинге трека в выдаче поиска.
 _NETEASE_DURATION_TOLERANCE_SEC = 7
+# Служебные строки-кредиты в LRC от NetEase ([00:00.00] 作曲 : Имя) — не текст
+# песни: без фильтра «作曲 : Егор Летов» висел бы в караоке до первой строки.
+_NETEASE_CREDIT_RE = re.compile(
+    r"^\s*(作曲|作词|编曲|制作人|出品|混音|母带|录音|吉他|贝斯|鼓|键盘)\s*[:：]"
+)
 
 # Таймстамп LRC: [MM:SS.cc] или [MM:SS.ccc]. Строка может начинаться с
 # НЕСКОЛЬКИХ таймстампов подряд ([00:10.00][01:30.00]Припев) — одна строка
@@ -255,6 +260,13 @@ async def _fetch_netease(
     lrc = ((data or {}).get("lrc") or {}).get("lyric") or None
     if not lrc:
         return None, False
+    # Вычищаем строки-кредиты ИЗ САМОГО LRC (а не только из timeline):
+    # synced персистится в Store, и timeline пересобирается из него после
+    # рестарта — фильтр только по timeline вернул бы кредиты из кэша.
+    lrc = "\n".join(
+        line for line in lrc.splitlines()
+        if not _NETEASE_CREDIT_RE.match(_LRC_TS.sub("", line).strip())
+    )
     timeline = _parse_lrc(lrc)
     if not timeline:
         # LRC без таймстампов — годится только как plain-текст.
