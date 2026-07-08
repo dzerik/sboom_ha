@@ -82,7 +82,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     from homeassistant.helpers.storage import Store
 
-    from .coordinator import LYRICS_STORE_VERSION
+    from .lyrics_manager import LYRICS_STORE_VERSION
 
     store = Store(hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}")
     await store.async_remove()

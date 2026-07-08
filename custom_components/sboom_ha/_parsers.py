@@ -155,131 +155,95 @@ def parse_state(raw: bytes) -> Optional[SpeakerState]:
     return None
 
 
-def parse_track(raw: bytes) -> Optional[TrackInfo]:
-    """Парсит трек из payload. Поддерживает push-формат и state-обёртку.
+def _scan_open_brace_backward(s: str, pos: int) -> int:
+    """Backward-скан от pos к ближайшей НЕзакрытой `{` (баланс скобок).
 
-    Стратегия: ищем `"trackId":"NNN"`, балансируем фигурные скобки чтобы захватить
-    окружающий JSON-объект целиком, потом разбираем поля.
+    Возвращает индекс открывающей скобки или -1, если не найдена.
     """
-    s = raw.decode("utf-8", errors="ignore")
+    depth = 0
+    for i in range(pos, -1, -1):
+        ch = s[i]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                return i
+            depth -= 1
+    return -1
 
+
+def _find_track_json(s: str) -> Optional[tuple[dict[str, Any], int]]:
+    """Ищет JSON-объект, содержащий `"trackId":"NNN"`.
+
+    Стратегия: regex по trackId → backward-скан к открывающей `{` →
+    forward-балансировка (`_extract_json_object`) → json.loads.
+    Возвращает (объект, позиция его `{` в s) или None.
+    """
     m = re.search(r'"trackId":"\d+"', s)
     if not m:
         return None
 
-    # backward scan для открывающей `{`
-    depth = 0
-    start = -1
-    for i in range(m.start() - 1, -1, -1):
-        ch = s[i]
-        if ch == '}':
-            depth += 1
-        elif ch == '{':
-            if depth == 0:
-                start = i
-                break
-            depth -= 1
+    start = _scan_open_brace_backward(s, m.start() - 1)
     if start < 0:
         return None
 
-    # forward scan — балансируем скобки чтобы найти конец объекта
-    depth = 1
-    in_str = False
-    esc = False
-    end = -1
-    for i in range(start + 1, len(s)):
-        ch = s[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == '\\':
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-    if end < 0:
+    obj = _extract_json_object(s, start)
+    if obj is None:
         return None
-
     try:
-        data = json.loads(s[start:end])
+        data = json.loads(obj)
     except json.JSONDecodeError:
-        _LOGGER.debug("track JSON parse failed: %s", s[start:end][:200])
+        _LOGGER.debug("track JSON parse failed: %s", obj[:200])
         return None
     if "trackId" not in data:
         return None
+    return data, start
 
-    # ──────────────────────────────────────────────────────────────
-    # Два наблюдаемых формата:
-    # 1) Push-формат (flat): {"artists":[...], "trackId":..., "playing":...}
-    # 2) State-формат (info-обёртка): {"artists":[...], "trackId":..., "duration":...}
-    #    при этом поля "playing", "position", "shuffle" находятся уровнем
-    #    ВЫШЕ — в player{}. У нас уже выбран только info{}, ищем
-    #    окружающий player{} в том же исходном тексте.
-    # ──────────────────────────────────────────────────────────────
-    outer: dict[str, Any] = {}
-    if "playing" not in data:
-        # state-формат — ищем окружающий player{} JSON
-        head = s[:start]
-        pm = list(re.finditer(r'"player"\s*:\s*\{', head))
-        if pm:
-            player_open = pm[-1].end() - 1   # позиция '{'
-            depth_p = 1
-            in_str_p = False
-            esc_p = False
-            p_end = -1
-            for i in range(player_open + 1, len(s)):
-                ch = s[i]
-                if in_str_p:
-                    if esc_p: esc_p = False
-                    elif ch == '\\': esc_p = True
-                    elif ch == '"': in_str_p = False
-                    continue
-                if ch == '"': in_str_p = True
-                elif ch == '{': depth_p += 1
-                elif ch == '}':
-                    depth_p -= 1
-                    if depth_p == 0: p_end = i + 1; break
-            if p_end > 0:
-                try:
-                    outer = json.loads(s[player_open:p_end])
-                except json.JSONDecodeError:
-                    outer = {}
 
-    ti = TrackInfo(raw=data)
-    ti.title = data.get("title")
+def _find_outer_player(s: str, start: int) -> dict[str, Any]:
+    """State-формат: ищет окружающий player{} перед позицией start.
 
+    В state-формате трек — это info{} внутри player{}, а "playing",
+    "position", "shuffle" лежат уровнем выше — в самом player{}.
+    Возвращает распарсенный player{} или {} при любом сбое.
+    """
+    pm = list(re.finditer(r'"player"\s*:\s*\{', s[:start]))
+    if not pm:
+        return {}
+    player_open = pm[-1].end() - 1  # позиция '{'
+    obj = _extract_json_object(s, player_open)
+    if obj is None:
+        return {}
+    try:
+        return json.loads(obj)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _parse_artists(ti: TrackInfo, data: dict[str, Any]) -> None:
     artists_list = data.get("artists") or []
     ti.artists = [a.get("name") for a in artists_list if a.get("name")]
     ti.artist_ids = [
         str(a.get("id")) for a in artists_list if a.get("id") is not None
     ]
 
-    # releases: ключ названия — "name" (push) или "title" (state)
+
+def _parse_release(ti: TrackInfo, data: dict[str, Any]) -> None:
+    """releases: ключ названия — "name" (push) или "title" (state)."""
     rels = data.get("releases") or []
-    if rels:
-        r0 = rels[0]
-        ti.album = r0.get("name") or r0.get("title")
-        rel_id = r0.get("id")
-        if rel_id is not None:
-            ti.release_id = str(rel_id)
+    if not rels:
+        return
+    r0 = rels[0]
+    ti.album = r0.get("name") or r0.get("title")
+    rel_id = r0.get("id")
+    if rel_id is not None:
+        ti.release_id = str(rel_id)
 
-    ti.track_id = str(data.get("trackId")) if data.get("trackId") else None
-    ti.playlist_title = data.get("playlistTitle") or (outer or {}).get("playlistTitle")
-    ti.provider = data.get("provider") or (outer or {}).get("provider")
 
-    dur = data.get("duration") or (outer or {}).get("duration") or 0
-    ti.duration_sec = int(dur) if dur else None
-
-    # position: push → dict {tsMs, val}; state → int секунды (в outer)
+def _parse_position(
+    ti: TrackInfo, data: dict[str, Any], outer: dict[str, Any]
+) -> None:
+    """position: push → dict {tsMs, val}; state → int секунды (в outer)."""
     pos_data = data.get("position")
     if isinstance(pos_data, dict):
         pv = pos_data.get("val")
@@ -300,24 +264,62 @@ def parse_track(raw: bytes) -> Optional[TrackInfo]:
             if isinstance(changed, (int, float)):
                 ti.position_ts_ms = int(changed)
 
-    # status-поля в data (push) или outer (state player{})
-    status_src = data if "playing" in data else (outer or {})
+
+def _parse_playback_status(
+    ti: TrackInfo, data: dict[str, Any], outer: dict[str, Any]
+) -> None:
+    """Статусные поля: в data (push) или в outer player{} (state)."""
+    status_src = data if "playing" in data else outer
     ti.playing = bool(status_src.get("playing", False))
     ti.shuffle = bool(status_src.get("shuffle", False))
     ti.repeat = status_src.get("repeatType")
 
-    ti.explicit = bool(data.get("explicit", False))
-    ti.liked = bool(data.get("like", False))
-
     # playbackSpeedRate: в push-формате — в data, в state-формате — в player{}
     speed = data.get("playbackSpeedRate")
     if speed is None:
-        speed = (outer or {}).get("playbackSpeedRate")
+        speed = outer.get("playbackSpeedRate")
     if speed is not None:
         try:
             ti.playback_speed = float(speed)
         except (TypeError, ValueError):
             ti.playback_speed = None
+
+
+def parse_track(raw: bytes) -> Optional[TrackInfo]:
+    """Парсит трек из payload. Поддерживает push-формат и state-обёртку.
+
+    Два наблюдаемых формата:
+    1) Push (flat): {"artists":[...], "trackId":..., "playing":...}
+    2) State (info-обёртка): {"artists":[...], "trackId":..., "duration":...},
+       при этом "playing"/"position"/"shuffle" — уровнем выше, в player{}.
+    """
+    s = raw.decode("utf-8", errors="ignore")
+
+    found = _find_track_json(s)
+    if found is None:
+        return None
+    data, start = found
+
+    # state-формат — статусные поля ищем в окружающем player{}
+    outer: dict[str, Any] = {}
+    if "playing" not in data:
+        outer = _find_outer_player(s, start)
+
+    ti = TrackInfo(raw=data)
+    ti.title = data.get("title")
+    ti.track_id = str(data.get("trackId")) if data.get("trackId") else None
+    ti.playlist_title = data.get("playlistTitle") or outer.get("playlistTitle")
+    ti.provider = data.get("provider") or outer.get("provider")
+    ti.explicit = bool(data.get("explicit", False))
+    ti.liked = bool(data.get("like", False))
+
+    dur = data.get("duration") or outer.get("duration") or 0
+    ti.duration_sec = int(dur) if dur else None
+
+    _parse_artists(ti, data)
+    _parse_release(ti, data)
+    _parse_position(ti, data, outer)
+    _parse_playback_status(ti, data, outer)
     return ti
 
 

@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
+from .const import REPEAT_TO_CANONICAL
 from .coordinator import SboomCoordinator
 from .helpers import cover_url
 
@@ -143,13 +144,9 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
     def repeat(self) -> RepeatMode | None:
         if not self.coordinator.track or not self.coordinator.track.repeat:
             return None
-        return {
-            "none":     RepeatMode.OFF,
-            "playlist": RepeatMode.ALL,
-            "all":      RepeatMode.ALL,
-            "track":    RepeatMode.ONE,
-            "one":      RepeatMode.ONE,
-        }.get(self.coordinator.track.repeat.lower(), RepeatMode.OFF)
+        # Канон REPEAT_TO_CANONICAL совпадает со значениями RepeatMode.
+        canon = REPEAT_TO_CANONICAL.get(self.coordinator.track.repeat.lower(), "off")
+        return RepeatMode(canon)
 
     @property
     def media_image_url(self) -> str | None:

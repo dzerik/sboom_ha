@@ -91,6 +91,47 @@ def test_parse_track_playback_speed_none_when_absent():
     assert track.playback_speed is None
 
 
+def test_parse_track_trackid_in_middle_of_large_payload():
+    """Реальный кейс: trackId глубоко в большом payload — бинарный префикс,
+    посторонний закрытый JSON-объект до трека и мусорный хвост после."""
+    raw = (
+        b"\x00\x04\xba\x01 binary prefix "
+        b'{"volume":{"muted":false,"percent":10}} '
+        b'{"trackId":"55","title":"Mid Track",'
+        b'"artists":[{"id":"7","name":"Artist Mid"}],'
+        b'"playing":true,"provider":"zvuk"}'
+        b"\xff\xfe trailing garbage"
+    )
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "55"
+    assert track.title == "Mid Track"
+    assert track.artists == ["Artist Mid"]
+    assert track.playing is True
+
+
+def test_parse_track_state_format_status_from_player_wrapper():
+    """State-формат: position/shuffle/timestamp берутся из окружающего player{},
+    а не из info{} с треком (info попадает в backward-скан по trackId)."""
+    raw = (
+        b"\x00\x02prefix"
+        b'{"info":{"player":{'
+        b'"playing":true,"position":42,"shuffle":true,'
+        b'"stateChangedTimestamp":1700000001234,'
+        b'"info":{"trackId":"777","title":"Deep Track",'
+        b'"artists":[{"id":"3","name":"Deep Artist"}],"duration":200}}}}'
+    )
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "777"
+    assert track.playing is True
+    assert track.shuffle is True
+    assert track.position_sec == 42
+    # timestamp позиции нет в state-формате — берётся stateChangedTimestamp
+    assert track.position_ts_ms == 1700000001234
+    assert track.duration_sec == 200
+
+
 # ─────────────────────── parse_queue ───────────────────────
 
 

@@ -71,7 +71,7 @@ def test_maybe_fetch_lyrics_no_op_when_disabled():
     coord.track = make_track(track_id="X")  # валидный трек
     coord._maybe_fetch_lyrics()
     # Если lyrics disabled — track_id НЕ должен попасть в inflight set
-    assert "X" not in coord._lyrics_inflight
+    assert "X" not in coord.lyrics._inflight
 
 
 def test_maybe_fetch_lyrics_runs_when_enabled():
@@ -82,7 +82,7 @@ def test_maybe_fetch_lyrics_runs_when_enabled():
     coord.track = make_track(track_id="Y", title="t", artists=["a"])
     coord._maybe_fetch_lyrics()
     # Background task создан → track_id в inflight
-    assert "Y" in coord._lyrics_inflight
+    assert "Y" in coord.lyrics._inflight
 
 
 # ─────────────────── coexistence with state ───────────────────

@@ -187,37 +187,14 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client: SberSpeakerClient | None = None
-            try:
-                client = SberSpeakerClient(
-                    host=self._host,  # type: ignore[arg-type]
-                    port=self._port,
-                    client_id=self._client_id,
-                    client_name=self._client_name,
-                )
-                await client.connect()
-                token = await asyncio.wait_for(
-                    client.pair_with_button(),
-                    timeout=PAIR_BUTTON_TIMEOUT_SEC + 5,
-                )
-            except PairTimeout:
-                errors["base"] = "pair_timeout"
-            except Exception:
-                _LOGGER.exception("reauth pair failed")
-                errors["base"] = "cannot_connect"
-            else:
+            token, errors = await self._async_do_pair()
+            if not errors:
                 # Обновляем entry новым токеном — остальные данные не трогаем
                 entry = self._get_reauth_entry()
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={CONF_PIN_ACCESS_TOKEN: token},
                 )
-            finally:
-                if client is not None:
-                    try:
-                        await client.close()
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("client.close in reauth-flow finally failed", exc_info=True)
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -408,29 +385,48 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ───────────────────────── Pair handshake ─────────────────────────
 
+    async def _async_do_pair(self) -> tuple[str | None, dict[str, str]]:
+        """Общий pair-handshake для pair- и reauth-шагов.
+
+        connect → pair_with_button (с таймаутом) → close. Возвращает
+        (token, errors): при успехе errors пуст, при ошибке token=None
+        и errors["base"] содержит "pair_timeout" либо "cannot_connect".
+        Что делать с полученным токеном — решает вызывающий step.
+        """
+        errors: dict[str, str] = {}
+        token: str | None = None
+        client: SberSpeakerClient | None = None
+        try:
+            client = SberSpeakerClient(
+                host=self._host,  # type: ignore[arg-type]
+                port=self._port,
+                client_id=self._client_id,
+                client_name=self._client_name,
+            )
+            await client.connect()
+            token = await asyncio.wait_for(
+                client.pair_with_button(),
+                timeout=PAIR_BUTTON_TIMEOUT_SEC + 5,
+            )
+        except PairTimeout:
+            errors["base"] = "pair_timeout"
+        except Exception:
+            _LOGGER.exception("pair failed")
+            errors["base"] = "cannot_connect"
+        finally:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("client.close in pair finally failed", exc_info=True)
+        return token, errors
+
     async def async_step_pair(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client: SberSpeakerClient | None = None
-            try:
-                client = SberSpeakerClient(
-                    host=self._host,  # type: ignore[arg-type]
-                    port=self._port,
-                    client_id=self._client_id,
-                    client_name=self._client_name,
-                )
-                await client.connect()
-                token = await asyncio.wait_for(
-                    client.pair_with_button(),
-                    timeout=PAIR_BUTTON_TIMEOUT_SEC + 5,
-                )
-            except PairTimeout:
-                errors["base"] = "pair_timeout"
-            except Exception:
-                _LOGGER.exception("pair failed")
-                errors["base"] = "cannot_connect"
-            else:
+            token, errors = await self._async_do_pair()
+            if not errors:
                 title = self._device_name or f"{DEFAULT_NAME} {self._host}"
                 return self.async_create_entry(
                     title=title,
@@ -446,12 +442,6 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_DEVICE_FIRMWARE: self._device_firmware,
                     },
                 )
-            finally:
-                if client is not None:
-                    try:
-                        await client.close()
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("client.close in pair-flow finally failed", exc_info=True)
 
         return self.async_show_form(
             step_id="pair",

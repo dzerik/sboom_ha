@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
@@ -31,8 +30,10 @@ from .const import (
     DEFAULT_LYRICS_OFFSET,
     DEFAULT_VOLUME_POLL_INTERVAL,
     DOMAIN,
-    LYRICS_CACHE_MAX,
+    ENVELOPE_FIELD_REQUEST_DATA,
     DEFAULT_LYRICS_ENABLED,
+    OP_GET_META_DATA,
+    OP_GET_STATE,
     OPT_LYRICS_OFFSET,
     OPT_AVAILABILITY_THRESHOLD,
     OPT_KEEPALIVE_INTERVAL,
@@ -51,14 +52,10 @@ EVENT_CONNECTION_CHANGED = "sboom_connection_changed"
 
 # Issue: колонка недоступна больше N секунд → создаём info-issue в Repairs.
 UNREACHABLE_ISSUE_THRESHOLD_SEC = 300  # 5 минут
-from .lyrics_client import Lyrics, fetch_lyrics, lyrics_from_dict, lyrics_to_dict
+from .lyrics_client import Lyrics
+from .lyrics_manager import LyricsManager
 
 _LOGGER = logging.getLogger(__name__)
-
-# Lyrics-кеш персистится в HA Store с debounce — чтобы не писать на диск
-# на каждый найденный трек.
-LYRICS_STORE_VERSION = 1
-LYRICS_SAVE_DELAY_SEC = 30
 
 
 class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -117,13 +114,12 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # страховка от half-open, который не поймал транспортный WS ping.
         self._poll_failures = 0
 
-        # Lyrics: кэш track_id -> Lyrics (None = ищется/не нашли).
-        self.lyrics_by_track: dict[str, Lyrics | None] = {}
-        self._lyrics_inflight: set[str] = set()
         self._http = async_get_clientsession(hass)
-        # Персистентный lyrics-кеш (JSON в .storage/, переживает рестарты HA).
-        self._lyrics_store: Store = Store(
-            hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}"
+        # Жизненный цикл текстов песен — в отдельном менеджере (SRP).
+        self.lyrics = LyricsManager(
+            hass, entry, self._http,
+            enabled=self._lyrics_enabled,
+            on_update=self.async_update_listeners,
         )
 
     @property
@@ -142,7 +138,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         реконнекты при обрывах ведёт фоновый supervisor.
         """
         self._stopping = False
-        await self._load_lyrics_cache()
+        await self.lyrics.async_load()
         try:
             await self._connect_and_sync()
         except asyncio.CancelledError:
@@ -183,11 +179,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.client.close()
         # Флашим отложенный (debounced) save лирики сейчас: после unload
         # запланированный async_delay_save писал бы в Store мёртвого entry.
-        if self.lyrics_by_track:
-            try:
-                await self._lyrics_store.async_save(self._lyrics_cache_data())
-            except Exception:  # не мешаем выгрузке из-за диска
-                _LOGGER.debug("lyrics cache flush failed", exc_info=True)
+        await self.lyrics.async_flush()
 
     # ─────────────────────── connection supervisor ───────────────────────
 
@@ -257,92 +249,14 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except asyncio.CancelledError:
                 raise
 
-    # ─────────────────────── lyrics ───────────────────────
+    # ─────────────────────── lyrics (фасад над LyricsManager) ───────────────────────
 
     def current_lyrics(self) -> Lyrics | None:
         """Lyrics для активного трека (или None если ещё не загружено / не нашлось)."""
-        if not self.track or not self.track.track_id:
-            return None
-        return self.lyrics_by_track.get(self.track.track_id)
+        return self.lyrics.current_for(self.track)
 
     def _maybe_fetch_lyrics(self) -> None:
-        """Запустить background fetch lyrics для текущего трека, если ещё не загружали."""
-        if not self._lyrics_enabled:
-            return
-        t = self.track
-        if not t or not t.track_id or not t.title or not t.artists:
-            return
-        tid = t.track_id
-        if tid in self.lyrics_by_track or tid in self._lyrics_inflight:
-            return
-        # Простая защита от роста кэша: при превышении дропаем самый старый.
-        if len(self.lyrics_by_track) >= LYRICS_CACHE_MAX:
-            self.lyrics_by_track.pop(next(iter(self.lyrics_by_track)), None)
-        self._lyrics_inflight.add(tid)
-        # Задача привязана к entry: при unload/reload HA сам её отменит —
-        # иначе fetch жил бы дольше координатора и писал в мёртвый Store.
-        self.entry.async_create_background_task(
-            self.hass,
-            self._fetch_lyrics(tid, t.title, ", ".join(t.artists), t.album, t.duration_sec),
-            name=f"{DOMAIN}-lyrics-{tid}",
-        )
-
-    async def _fetch_lyrics(
-        self,
-        track_id: str,
-        title: str,
-        artist: str,
-        album: str | None,
-        duration_sec: int | None,
-    ) -> None:
-        try:
-            result = await fetch_lyrics(self._http, title, artist, album, duration_sec)
-            if result is None:
-                # Сетевая ошибка — НЕ кэшируем, дадим retry при следующем track-update.
-                _LOGGER.debug("lyrics fetch error for %s — will retry later", track_id)
-                return
-            self.lyrics_by_track[track_id] = result
-            # Персист в Store с debounce — не пишем на диск на каждый трек.
-            self._lyrics_store.async_delay_save(
-                self._lyrics_cache_data, LYRICS_SAVE_DELAY_SEC
-            )
-            _LOGGER.debug(
-                "lyrics for %s (%r — %r): %s",
-                track_id, title, artist,
-                "found" if result.plain or result.synced
-                else ("instrumental" if result.instrumental else "not_found"),
-            )
-            # Только перерисовка entities: state/track не менялись, а
-            # async_set_updated_data сдвинул бы volume-poll и отменил
-            # pending request_refresh.
-            self.async_update_listeners()
-        finally:
-            self._lyrics_inflight.discard(track_id)
-
-    def _lyrics_cache_data(self) -> dict[str, dict]:
-        """Снимок lyrics-кеша для персиста (только реальные Lyrics, без None)."""
-        return {
-            tid: lyrics_to_dict(lyr)
-            for tid, lyr in self.lyrics_by_track.items()
-            if lyr is not None
-        }
-
-    async def _load_lyrics_cache(self) -> None:
-        """Загрузить персистентный lyrics-кеш из HA Store при старте."""
-        try:
-            stored = await self._lyrics_store.async_load()
-        except Exception:  # повреждённый файл — не критично, стартуем с пустым
-            _LOGGER.warning("lyrics cache load failed", exc_info=True)
-            return
-        if not isinstance(stored, dict):
-            return
-        for tid, payload in list(stored.items())[:LYRICS_CACHE_MAX]:
-            if isinstance(payload, dict):
-                try:
-                    self.lyrics_by_track[tid] = lyrics_from_dict(payload)
-                except Exception:  # битая запись — пропускаем
-                    continue
-        _LOGGER.debug("lyrics cache loaded: %d entries", len(self.lyrics_by_track))
+        self.lyrics.maybe_fetch(self.track)
 
     # ─────────────────────── optimistic updates ───────────────────────
 
@@ -456,13 +370,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _handle_event(self, raw: bytes, parsed: dict[int, Any]) -> None:
         """Колонка отправила unsolicited / push message — обновляем state/track."""
-        req_data = parsed.get(5)
+        req_data = parsed.get(ENVELOPE_FIELD_REQUEST_DATA)
         if not isinstance(req_data, dict):
             return
         prev_track = self.track
         prev_state = self.state
         changed = False
-        if 10 in req_data:    # MetaData update
+        if OP_GET_META_DATA in req_data:    # MetaData update
             try:
                 new_track = self._stamp_track(self.client.parse_track(raw))
                 if new_track is not None:
@@ -471,7 +385,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     changed = True
             except Exception:  # pragma: no cover
                 _LOGGER.exception("metadata push parse failed")
-        if 12 in req_data:    # State update
+        if OP_GET_STATE in req_data:    # State update
             try:
                 new_state = self.client.parse_state(raw)
                 if new_state is not None:

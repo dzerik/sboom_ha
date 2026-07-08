@@ -26,7 +26,9 @@ def test_device_info_full_zeroconf_data():
     assert di.model == "sberboom-r2"
     assert di.sw_version == "1.234.56"
     assert di.serial_number == "serial-abc-123"
-    assert di.configuration_url == "http://10.0.0.42"
+    # configuration_url не задаётся: веб-интерфейса у колонки нет,
+    # ссылка вела бы на несуществующую страницу (находка ревью UI/UX).
+    assert not di.configuration_url
 
 
 def test_device_info_manual_flow_partial():
@@ -57,8 +59,7 @@ def test_device_info_manual_flow_partial():
     # sw_version и serial_number отсутствуют
     assert di.sw_version is None
     assert di.serial_number is None
-    # configuration_url всегда есть (от host)
-    assert di.configuration_url == "http://10.0.0.99"
+    assert not di.configuration_url
 
 
 def test_device_info_serial_equals_device_id():

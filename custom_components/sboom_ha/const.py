@@ -80,6 +80,32 @@ BT_CMD_REMOVE     = 2
 # Тип токена для PIN-сессии (единственный поддерживаемый этой интеграцией).
 TOKEN_TYPE_PIN_AUTH = 1
 
+# Поля envelope верхнего уровня WS-кадра (теги TLV).
+ENVELOPE_FIELD_MSG_ID = 2        # id запроса — матчинг request/response
+ENVELOPE_FIELD_REQUEST_DATA = 5  # request_data — вложенные op-поля
+
+# Статусы pair-handshake (наблюдаемое поведение прошивки).
+# Первый ответ (поле 4 в request_data):
+PAIR_STATUS_WAITING    = 1  # ждём нажатия «+», sub[2] — id сессии
+PAIR_STATUS_AUTHORIZED = 2  # авторизовано сразу, sub[2] — pin-токен
+PAIR_STATUS_BUSY       = 3  # pair-сессия уже занята
+PAIR_STATUS_DISABLED   = 5  # pair-режим выключен на колонке
+# Второй ответ (поле 6, после нажатия «+»):
+PAIR_CONFIRM_OK       = 1   # sub[2] — финальный pin-токен
+PAIR_CONFIRM_REJECTED = 2
+
+# Единая нормализация repeat-значений → канон {"off","all","one"}.
+# API-метаданные отдают none/playlist/all/track/one, HA RepeatMode — off/all/one,
+# select-опции — off/playlist/track. Один источник вместо трёх локальных карт.
+REPEAT_TO_CANONICAL = {
+    "none":     "off",
+    "off":      "off",
+    "playlist": "all",
+    "all":      "all",
+    "track":    "one",
+    "one":      "one",
+}
+
 # mDNS discovery
 ZEROCONF_TYPE = "_staros._tcp.local."
 

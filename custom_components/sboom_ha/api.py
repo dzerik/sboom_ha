@@ -57,9 +57,18 @@ from .const import (
     OP_SET_PLAYBACK_SPEED,
     OP_SET_TRACK_POS,
     OP_SET_VOLUME,
+    ENVELOPE_FIELD_MSG_ID,
+    ENVELOPE_FIELD_REQUEST_DATA,
     PAIR_BUTTON_TIMEOUT_SEC,
+    PAIR_CONFIRM_OK,
+    PAIR_CONFIRM_REJECTED,
+    PAIR_STATUS_AUTHORIZED,
+    PAIR_STATUS_BUSY,
+    PAIR_STATUS_DISABLED,
+    PAIR_STATUS_WAITING,
     PLAYBACK_SPEED_MAX,
     PLAYBACK_SPEED_MIN,
+    REPEAT_TO_CANONICAL,
     TOKEN_TYPE_PIN_AUTH,
 )
 
@@ -232,50 +241,43 @@ class SberSpeakerClient:
             # pin-токен (полный доступ к колонке), а лог часто прикладывают к issue.
             _LOGGER.debug("pair: msg #%d (%d bytes)", msg_idx, len(resp))
 
-            req_data = parsed.get(5)
+            req_data = parsed.get(ENVELOPE_FIELD_REQUEST_DATA)
             if not isinstance(req_data, dict):
                 continue
 
             # Первый ответ (поле 4): статус-код в sub[1], опц. данные в sub[2].
-            # Эмпирически наблюдаемые статусы:
-            #   1 → ждём подтверждения (нажатия "+"), sub[2] — идентификатор сессии
-            #   2 → авторизовано, sub[2] — pin-токен
-            #   3 → сессия уже занята
-            #   5 → pair-режим выключен на колонке
             pin_resp = req_data.get(4)
             if isinstance(pin_resp, dict):
                 status = pin_resp.get(1)
-                if status == 2:
+                if status == PAIR_STATUS_AUTHORIZED:
                     token = pin_resp.get(2)
                     if isinstance(token, str) and len(token) >= 16:
                         _LOGGER.info("pair: token received (init-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
-                elif status == 1:
+                elif status == PAIR_STATUS_WAITING:
                     sess = pin_resp.get(2)
                     _LOGGER.info(
                         "pair: waiting for '+' button press (session=%s)", sess
                     )
                     # просто ждём — колонка пришлёт следующий ответ после нажатия
                     continue
-                elif status == 3:
+                elif status == PAIR_STATUS_BUSY:
                     raise PairTimeout("pair: session already active")
-                elif status == 5:
+                elif status == PAIR_STATUS_DISABLED:
                     raise PairTimeout("pair: mode disabled on speaker")
 
-            # Второй ответ (поле 6) — после нажатия "+":
-            #   1 → авторизовано, sub[2] — финальный pin-токен
-            #   2 → отказано
+            # Второй ответ (поле 6) — после нажатия "+".
             confirm = req_data.get(6)
             if isinstance(confirm, dict):
                 status = confirm.get(1)
-                if status == 1:
+                if status == PAIR_CONFIRM_OK:
                     token = confirm.get(2)
                     if isinstance(token, str) and len(token) >= 16:
                         _LOGGER.info("pair: token received (confirm-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
-                elif status == 2:
+                elif status == PAIR_CONFIRM_REJECTED:
                     raise PairTimeout("pair: rejected by speaker")
         raise PairTimeout("pair timed out — кнопка '+' не была нажата")
 
@@ -352,15 +354,14 @@ class SberSpeakerClient:
         await self._send_media_command(MEDIA_CMD_SHUFFLE_ON if on else MEDIA_CMD_SHUFFLE_OFF)
 
     async def media_repeat(self, mode: str) -> None:
-        """mode: 'none' | 'playlist'/'all' | 'track'/'one'"""
-        cmd_by_mode = {
-            "none":     MEDIA_CMD_REPEAT_NONE,
-            "playlist": MEDIA_CMD_REPEAT_PLAYLIST,
-            "all":      MEDIA_CMD_REPEAT_PLAYLIST,
-            "track":    MEDIA_CMD_REPEAT_TRACK,
-            "one":      MEDIA_CMD_REPEAT_TRACK,
-        }
-        await self._send_media_command(cmd_by_mode.get(mode.lower(), MEDIA_CMD_REPEAT_NONE))
+        """mode — любой синоним из REPEAT_TO_CANONICAL ('none'/'off', 'playlist'/'all', 'track'/'one')."""
+        canon = REPEAT_TO_CANONICAL.get(mode.lower(), "off")
+        cmd = {
+            "off": MEDIA_CMD_REPEAT_NONE,
+            "all": MEDIA_CMD_REPEAT_PLAYLIST,
+            "one": MEDIA_CMD_REPEAT_TRACK,
+        }[canon]
+        await self._send_media_command(cmd)
 
     async def seek_to(self, position_sec: int) -> None:
         # seek-операция: единица — секунды (наблюдаемое поведение)
@@ -401,12 +402,12 @@ class SberSpeakerClient:
         cast = _field(OP_MEDIA_COMMAND, 2, request_inner)
         await self._fire_and_forget(cast)
 
-    def _envelope(self, req_id: str, request_data: bytes, *, with_token: bool = True) -> bytes:
+    def _envelope(self, req_id: str, request_data: bytes) -> bytes:
         parts = [
             _field(1, 0, 2),                                 # type=REQUEST
             _field(2, 2, req_id.encode()),                   # id
         ]
-        if with_token and self.pin_access_token:
+        if self.pin_access_token:
             parts.append(_field(3, 2, self.pin_access_token.encode()))
         parts += [
             _field(5, 2, request_data),                      # request_data
@@ -449,7 +450,7 @@ class SberSpeakerClient:
                     msg = msg.encode()
                 parsed = _decode_tlv(msg)
                 # сматчить с pending по id, либо считать unsolicited
-                msg_id = parsed.get(2)
+                msg_id = parsed.get(ENVELOPE_FIELD_MSG_ID)
                 if isinstance(msg_id, str) and msg_id in self._pending:
                     fut = self._pending.pop(msg_id)
                     if not fut.done():

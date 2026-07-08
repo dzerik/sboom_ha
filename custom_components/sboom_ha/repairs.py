@@ -25,6 +25,7 @@ from .const import (
     CONF_HOST,
     CONF_PORT,
     DEFAULT_PORT,
+    DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +70,15 @@ class SpeakerUnreachableRepairFlow(RepairsFlow):
                 )
                 errors["base"] = "cannot_connect"
             else:
+                # Как и в reconfigure-flow: legacy unique_id привязан к старому
+                # IP — без обновления он навсегда «занимает» старый адрес, и
+                # добавление другой колонки на нём упрётся в ложный
+                # already_configured.
+                old_host = entry.data.get(CONF_HOST)
+                if entry.unique_id == f"{DOMAIN}_{old_host}" and new_host != old_host:
+                    self.hass.config_entries.async_update_entry(
+                        entry, unique_id=f"{DOMAIN}_{new_host}"
+                    )
                 self.hass.config_entries.async_update_entry(
                     entry,
                     data={**entry.data, CONF_HOST: new_host, CONF_PORT: new_port},

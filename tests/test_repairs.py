@@ -167,6 +167,37 @@ async def test_fix_flow_updates_host_and_reloads(monkeypatch):
     assert hass.config_entries.reloaded == [entry.entry_id]
 
 
+async def test_fix_flow_migrates_legacy_host_unique_id(monkeypatch):
+    """Legacy host-based unique_id мигрирует на новый host при смене IP.
+
+    Без миграции старый unique_id навсегда «занимает» прежний адрес —
+    добавление другой колонки на нём упрётся в ложный already_configured.
+    """
+    entry = make_entry(host="192.0.2.10")
+    entry.unique_id = f"{DOMAIN}_192.0.2.10"
+    hass, flow = _build_flow(monkeypatch, entry=entry)
+
+    result = await flow.async_step_init({CONF_HOST: "192.0.2.99"})
+
+    assert result["type"] == "create_entry"
+    assert entry.unique_id == f"{DOMAIN}_192.0.2.99"
+    assert entry.data[CONF_HOST] == "192.0.2.99"
+    assert hass.config_entries.reloaded == [entry.entry_id]
+
+
+async def test_fix_flow_keeps_device_id_unique_id(monkeypatch):
+    """device_id-based unique_id (не host-based) при смене host НЕ трогается."""
+    entry = make_entry(host="192.0.2.10")
+    entry.unique_id = f"{DOMAIN}_test-device-id"
+    hass, flow = _build_flow(monkeypatch, entry=entry)
+
+    result = await flow.async_step_init({CONF_HOST: "192.0.2.99"})
+
+    assert result["type"] == "create_entry"
+    assert entry.unique_id == f"{DOMAIN}_test-device-id"
+    assert entry.data[CONF_HOST] == "192.0.2.99"
+
+
 async def test_fix_flow_connect_failure_keeps_entry(monkeypatch):
     """Колонка не отвечает по введённому адресу → ошибка, entry не изменён."""
     entry = make_entry(host="192.0.2.10")
