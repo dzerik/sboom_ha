@@ -389,6 +389,16 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 new_state = self.client.parse_state(raw)
                 if new_state is not None:
+                    # Диагностика канала доставки громкости: research-доки
+                    # противоречат друг другу (PROTOCOL.md: «volume changes
+                    # триггерят push»; RESUME: «volume НЕ приходит push'ем»).
+                    # Если в логах появится volume=<число> — комментарии и
+                    # интервал поллинга можно пересматривать.
+                    _LOGGER.debug(
+                        "state-push получен: volume=%s muted=%s (маркеры=%s)",
+                        new_state.volume_percent, new_state.muted,
+                        sorted(k for k in req_data if isinstance(k, int)),
+                    )
                     self.state = self._merge_state(new_state)
                     changed = True
             except Exception:
