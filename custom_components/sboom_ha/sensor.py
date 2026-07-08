@@ -56,6 +56,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="led_brightness",
         icon="mdi:brightness-6",
         native_unit=PERCENTAGE,
+        state_class="measurement",  # строка == SensorStateClass.MEASUREMENT
         value_fn=lambda c: dev.led_brightness if (dev := _dev(c)) else None,
     ),
     # Количество установленных будильников. Список — в атрибутах.
@@ -255,6 +256,10 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
     _attr_icon = "mdi:text"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False  # включается вручную если нужен
+    # ENUM: набор состояний определяется нашим же кодом (native_value ниже) —
+    # HA получает переводимые состояния и валидацию значений.
+    _attr_device_class = "enum"  # строка == SensorDeviceClass.ENUM
+    _attr_options = ["no_track", "loading", "available", "instrumental", "not_found"]
 
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)

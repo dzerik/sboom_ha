@@ -19,6 +19,12 @@ try:  # HA 2023.12+
 except ImportError:  # legacy
     from homeassistant.components.zeroconf import ZeroconfServiceInfo  # type: ignore[no-redef]
 
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
+
 from .api import PairTimeout, SberSpeakerClient
 from .const import (
     CONF_CLIENT_ID,
@@ -79,7 +85,18 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Текущие значения = из options, fallback на дефолты
+        # Текущие значения = из options, fallback на дефолты.
+        # NumberSelector вместо голых int-полей: UI показывает единицы
+        # измерения и границы, а не безымянное числовое поле.
+        def _seconds(min_v: float, max_v: float, step: float = 1) -> NumberSelector:
+            return NumberSelector(
+                NumberSelectorConfig(
+                    min=min_v, max=max_v, step=step,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            )
+
         opts = self.config_entry.options
         return self.async_show_form(
             step_id="init",
@@ -88,15 +105,22 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         OPT_VOLUME_POLL_INTERVAL,
                         default=opts.get(OPT_VOLUME_POLL_INTERVAL, DEFAULT_VOLUME_POLL_INTERVAL),
-                    ): vol.All(int, vol.Range(min=1, max=60)),
+                    ): vol.All(_seconds(1, 60), vol.Coerce(int)),
                     vol.Optional(
                         OPT_KEEPALIVE_INTERVAL,
                         default=opts.get(OPT_KEEPALIVE_INTERVAL, DEFAULT_KEEPALIVE_INTERVAL),
-                    ): vol.All(int, vol.Range(min=5, max=120)),
+                    ): vol.All(_seconds(5, 120), vol.Coerce(int)),
                     vol.Optional(
                         OPT_AVAILABILITY_THRESHOLD,
                         default=opts.get(OPT_AVAILABILITY_THRESHOLD, DEFAULT_AVAILABILITY_THRESHOLD),
-                    ): vol.All(int, vol.Range(min=1, max=20)),
+                    ): vol.All(
+                        NumberSelector(
+                            NumberSelectorConfig(
+                                min=1, max=20, step=1, mode=NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Coerce(int),
+                    ),
                     vol.Optional(
                         OPT_LYRICS_ENABLED,
                         default=opts.get(OPT_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED),
@@ -104,7 +128,7 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         OPT_LYRICS_OFFSET,
                         default=opts.get(OPT_LYRICS_OFFSET, DEFAULT_LYRICS_OFFSET),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=-10.0, max=10.0)),
+                    ): vol.All(_seconds(-10, 10, 0.1), vol.Coerce(float)),
                 }
             ),
         )

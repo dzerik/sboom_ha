@@ -50,6 +50,7 @@ async def async_setup_entry(
 
 class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
     _attr_name = None  # = device name (через has_entity_name из SboomEntity)
+    _attr_device_class = "speaker"  # строка == MediaPlayerDeviceClass.SPEAKER
     _attr_supported_features = SUPPORTED
 
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:

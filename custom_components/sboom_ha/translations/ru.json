@@ -29,6 +29,10 @@
           "host": "IP-адрес",
           "port": "Порт"
         }
+      },
+      "reauth_confirm": {
+        "title": "Повторное сопряжение {name}",
+        "description": "Колонке {name} ({host}) требуется повторная авторизация (например, после сброса к заводским настройкам).\n\n**Нажмите кнопку «+» на колонке**, затем подтвердите.\n\n(Таймаут: {timeout} секунд)"
       }
     },
     "error": {
@@ -37,13 +41,15 @@
     },
     "abort": {
       "already_configured": "Эта колонка уже добавлена.",
-      "incomplete_discovery": "Обнаруженный сервис не содержит ID устройства."
+      "incomplete_discovery": "Обнаруженный сервис не содержит ID устройства.",
+      "reauth_successful": "Повторная авторизация выполнена.",
+      "reconfigure_successful": "Настройки обновлены."
     }
   },
   "issues": {
     "speaker_unreachable": {
       "title": "Колонка {name} недоступна",
-      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — перенастройте через Settings → Integrations → SBoom → ⋮ → Reconfigure.",
+      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — нажмите «Исправить» ниже или используйте «Настройки → Устройства и службы → SBoom → ⋮ → Перенастроить».",
       "fix_flow": {
         "step": {
           "init": {
@@ -70,7 +76,8 @@
           "volume_poll_interval": "Интервал опроса громкости, сек",
           "keepalive_interval": "Интервал WebSocket keepalive, сек",
           "availability_threshold": "Порог недоступности (неудачных reconnect'ов)",
-          "lyrics_enabled": "Загружать synced lyrics с Lrclib.net"
+          "lyrics_enabled": "Загружать synced lyrics с Lrclib.net",
+          "lyrics_offset": "Сдвиг текста песни, секунды (+ раньше / − позже)"
         }
       }
     }
@@ -136,7 +143,14 @@
         "name": "Текущая строка lyrics"
       },
       "lyrics": {
-        "name": "Lyrics"
+        "name": "Lyrics",
+        "state": {
+          "no_track": "Нет трека",
+          "loading": "Загрузка",
+          "available": "Найден",
+          "instrumental": "Инструментал",
+          "not_found": "Не найден"
+        }
       },
       "led_brightness": {
         "name": "Яркость дисплея"
@@ -195,6 +209,46 @@
     },
     "no_loaded_speakers": {
       "message": "Ни одна загруженная колонка SBoom не подходит под этот вызов. Проверьте, что интеграция настроена и устройство указано верно."
+    }
+  },
+  "services": {
+    "refresh_metadata": {
+      "name": "Обновить метаданные",
+      "description": "Принудительно запросить текущий трек и состояние колонки, не дожидаясь poll-цикла.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        }
+      }
+    },
+    "reauth": {
+      "name": "Повторная авторизация (re-pair)",
+      "description": "Запустить повторную привязку. После вызова сервиса нажмите кнопку «+» на корпусе колонки.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom для переавторизации."
+        }
+      }
+    },
+    "bluetooth_device": {
+      "name": "Команда Bluetooth-устройству",
+      "description": "Подключить, отключить или удалить спаренное Bluetooth-устройство колонки.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        },
+        "mac_address": {
+          "name": "MAC-адрес",
+          "description": "MAC Bluetooth-устройства (см. атрибут devices сенсора «Спаренные Bluetooth-устройства»)."
+        },
+        "command": {
+          "name": "Команда",
+          "description": "Действие над устройством."
+        }
+      }
     }
   }
 }
