@@ -8,7 +8,11 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
+
+try:  # HA 2024.4+ — актуальный тип результата config flow
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:  # legacy
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
 
 try:  # HA 2023.12+
     from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -69,7 +73,7 @@ def _decode_props(raw: dict) -> dict[str, str]:
 class SboomOptionsFlow(config_entries.OptionsFlow):
     """Опции, редактируемые после установки (Settings → Integrations → SBoom → Configure)."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
@@ -122,7 +126,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ───────────────────────── Manual step ─────────────────────────
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             self._host = user_input[CONF_HOST]
@@ -150,8 +154,13 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ───────────────────────── Reauth flow ─────────────────────────
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
-        """Триггер: AuthError в coordinator → entry.async_start_reauth(hass).
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Повторная авторизация (новый pair-handshake).
+
+        Автоматического триггера НЕТ: локальный протокол колонки не отдаёт
+        различимого признака «токен отвергнут» (недоступность и отзыв токена
+        выглядят одинаково), поэтому ложные reauth-баннеры при сетевых сбоях
+        были бы хуже. Запускается вручную: сервис `sboom_ha.reauth`.
 
         Восстанавливаем контекст из существующего entry — host, port, ids,
         и переходим к подтверждению (тот же pair-handshake).
@@ -167,7 +176,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Повторный pair-handshake: пользователь снова жмёт `+` на колонке."""
         errors: dict[str, str] = {}
 
@@ -219,7 +228,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Изменить host/port для существующего entry без удаления.
 
         Полезно когда колонка получила новый статический IP, или при переезде
@@ -308,7 +317,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return entry
         return None
 
-    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> FlowResult:
+    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> ConfigFlowResult:
         """Колонка обнаружена через mDNS (_staros._tcp.local.)."""
         host = discovery_info.host
         port = discovery_info.port or DEFAULT_PORT
@@ -373,7 +382,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_discovery_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Подтверждаем обнаружение и переходим к pair."""
         if user_input is not None:
             self._client_name = user_input.get(CONF_CLIENT_NAME, self._client_name)
@@ -393,7 +402,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ───────────────────────── Pair handshake ─────────────────────────
 
-    async def async_step_pair(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_pair(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:

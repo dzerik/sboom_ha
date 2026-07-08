@@ -193,6 +193,12 @@ action:
 - **Сменился IP колонки** — `Settings → Integrations → SBoom → ⋮ → Reconfigure`. PIN-токен сохраняется.
 - **PIN-токен умер** (factory reset, переустановка) — `Settings → Integrations → SBoom → ⋮ → Reconfigure` или service `sboom_ha.reauth`.
 
+## Удаление интеграции
+
+1. **Settings → Devices & Services → SBoom (LAN)** → меню entry (⋮) → **Delete**.
+2. Если интеграция ставилась через HACS и больше не нужна: **HACS → SBoom (LAN)** → ⋮ → **Remove**, затем перезапустить Home Assistant.
+3. На колонке ничего чистить не нужно: pair-токен, выданный при нажатии «+», хранится только в Home Assistant и умирает вместе с config entry. Кэш текстов песен (`.storage/sboom_ha_lyrics_*`) удаляется автоматически вместе с entry.
+
 ## Включение опциональных entity
 
 Camera и диагностические sensors отключены по умолчанию (это тяжеловесные сущности). Чтобы их включить:

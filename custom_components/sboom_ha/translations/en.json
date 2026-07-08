@@ -192,6 +192,9 @@
   "exceptions": {
     "command_failed": {
       "message": "Could not run \"{action}\": speaker unavailable ({error})"
+    },
+    "no_loaded_speakers": {
+      "message": "No loaded SBoom speakers match this call. Check that the integration is set up and the device is targeted correctly."
     }
   }
 }

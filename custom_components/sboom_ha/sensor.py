@@ -12,7 +12,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
 from ._entity_base import SboomEntity
-from .const import DOMAIN
 from .coordinator import SboomCoordinator
 from .helpers import track_position
 from .lyrics_client import current_line
@@ -26,7 +25,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SboomCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SboomCoordinator = entry.runtime_data
     async_add_entities([
         SboomLyricsCurrentLineSensor(coordinator, entry),
         SboomLyricsFullSensor(coordinator, entry),

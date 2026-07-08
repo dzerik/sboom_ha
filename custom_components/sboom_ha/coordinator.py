@@ -177,6 +177,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._supervisor_task.cancel()
             self._supervisor_task = None
         await self.client.close()
+        # Флашим отложенный (debounced) save лирики сейчас: после unload
+        # запланированный async_delay_save писал бы в Store мёртвого entry.
+        if self.lyrics_by_track:
+            try:
+                await self._lyrics_store.async_save(self._lyrics_cache_data())
+            except Exception:  # не мешаем выгрузке из-за диска
+                _LOGGER.debug("lyrics cache flush failed", exc_info=True)
 
     # ─────────────────────── connection supervisor ───────────────────────
 
@@ -268,7 +275,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if len(self.lyrics_by_track) >= LYRICS_CACHE_MAX:
             self.lyrics_by_track.pop(next(iter(self.lyrics_by_track)), None)
         self._lyrics_inflight.add(tid)
-        self.hass.async_create_background_task(
+        # Задача привязана к entry: при unload/reload HA сам её отменит —
+        # иначе fetch жил бы дольше координатора и писал в мёртвый Store.
+        self.entry.async_create_background_task(
+            self.hass,
             self._fetch_lyrics(tid, t.title, ", ".join(t.artists), t.album, t.duration_sec),
             name=f"{DOMAIN}-lyrics-{tid}",
         )

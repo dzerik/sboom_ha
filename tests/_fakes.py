@@ -118,4 +118,7 @@ def build_coordinator(
     coord.entry = entry  # already done by __init__, but explicit for clarity
     coord.track = track
     coord.state = state
+    # Как в проде: координатор живёт в entry.runtime_data, entry известен HA.
+    entry.runtime_data = coord
+    hass.config_entries.add(entry)
     return coord

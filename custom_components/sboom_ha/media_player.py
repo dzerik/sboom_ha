@@ -16,7 +16,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
-from .const import DOMAIN
 from .coordinator import SboomCoordinator
 from .helpers import cover_url
 
@@ -44,7 +43,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SboomCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SboomCoordinator = entry.runtime_data
     async_add_entities([SboomMediaPlayer(coordinator, entry)])
 
 

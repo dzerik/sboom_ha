@@ -42,6 +42,15 @@ class ConfigEntryNotReady(HomeAssistantError):
     """stub: setup не готов, HA повторит попытку."""
 
 
+class ServiceValidationError(HomeAssistantError):
+    """Stub: ошибка валидации service call."""
+
+    def __init__(self, *args, translation_domain=None, translation_key=None, **kwargs):
+        super().__init__(*args)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+
+
 class ConfigEntryAuthFailed(HomeAssistantError):
     """stub: требуется переавторизация."""
 
@@ -96,8 +105,10 @@ class _FakeServices:
     def has_service(self, domain: str, service: str) -> bool:
         return (domain, service) in self._registered
 
-    def async_register(self, domain: str, service: str, handler) -> None:
+    def async_register(self, domain: str, service: str, handler, schema=None) -> None:
         self._registered[(domain, service)] = handler
+        self._schemas = getattr(self, "_schemas", {})
+        self._schemas[(domain, service)] = schema
 
 
 class _FakeConfigEntries:
@@ -127,6 +138,9 @@ class _FakeConfigEntries:
 
     def async_schedule_reload(self, entry_id: str) -> None:
         self.reloaded.append(entry_id)
+
+    def async_entries(self, domain=None):
+        return list(self._entries.values())
 
 
 class HomeAssistant:
@@ -170,11 +184,24 @@ class ConfigEntry:
         self.minor_version = minor_version
         self.unique_id = unique_id
 
+        self.runtime_data = None
+
     def async_on_unload(self, fn) -> None:
         pass
 
     def add_update_listener(self, fn):
         return lambda: None
+
+    def async_create_background_task(self, hass, coro, name=None, **kwargs):
+        # Как и HomeAssistant-стаб: не запускаем, закрываем coroutine.
+        try:
+            coro.close()
+        except Exception:  # pragma: no cover
+            pass
+        return None
+
+    def async_start_reauth(self, hass) -> None:
+        self.reauth_started = True
 
 
 class ConfigFlow:
@@ -540,6 +567,7 @@ def install_stubs() -> None:
         HomeAssistantError=HomeAssistantError,
         ConfigEntryNotReady=ConfigEntryNotReady,
         ConfigEntryAuthFailed=ConfigEntryAuthFailed,
+        ServiceValidationError=ServiceValidationError,
     )
     _make_module(
         "homeassistant.config_entries",

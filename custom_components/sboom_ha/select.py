@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
-from .const import DOMAIN, PLAYBACK_SPEED_OPTIONS
+from .const import PLAYBACK_SPEED_OPTIONS
 from .coordinator import SboomCoordinator
 
 # Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
@@ -28,7 +28,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coord: SboomCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coord: SboomCoordinator = entry.runtime_data
     async_add_entities([
         SboomRepeatSelect(coord, entry),
         SboomPlaybackSpeedSelect(coord, entry),
