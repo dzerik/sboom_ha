@@ -48,6 +48,19 @@ def track_position(coordinator: SboomCoordinator) -> float | None:
     return pos
 
 
+def lyrics_position(coordinator: SboomCoordinator) -> float | None:
+    """Позиция для синхронизации лирики: track_position + пользовательский offset.
+
+    Offset (options flow) компенсирует систематическое опережение/отставание
+    текстов конкретной колонки. К media_position НЕ применяется.
+    """
+    pos = track_position(coordinator)
+    if pos is None:
+        return None
+    offset = getattr(coordinator, "lyrics_offset", 0.0) or 0.0
+    return max(0.0, pos + offset)
+
+
 def cover_url(track: TrackInfo) -> str | None:
     """URL обложки трека из public Zvuk CDN (без auth)."""
     if not track or track.provider != "zvuk":

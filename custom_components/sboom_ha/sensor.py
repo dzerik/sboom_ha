@@ -1,7 +1,7 @@
 """Сенсоры sboom_ha: текущая строка lyrics + полный текст в атрибутах."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -9,11 +9,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later
 
 from ._entity_base import SboomEntity
 from .coordinator import SboomCoordinator
-from .helpers import track_position
+from .helpers import lyrics_position
 from .lyrics_client import current_line
 
 # Read-only сенсоры, данные из coordinator — параллелизм безразличен.
@@ -41,23 +41,38 @@ async def async_setup_entry(
 
 
 class SboomLyricsCurrentLineSensor(SboomEntity, SensorEntity):
-    """State = текущая строка lyrics, активная по позиции трека."""
+    """State = текущая строка lyrics, активная по позиции трека.
+
+    Для треков без synced-текста сенсор остаётся available со state=None
+    (unknown): «нет лирики» — валидное состояние данных, а не недоступность
+    устройства. Иначе автоматизации ловили бы ложные unavailable на каждом
+    треке без текста.
+    """
 
     _attr_translation_key = "lyrics_current_line"
     _attr_icon = "mdi:script-text"
-    _SYNC_INTERVAL = timedelta(seconds=1)
 
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{self._device_unique_prefix}_lyrics_current_line"
         self._last_line: str | None = None
+        self._unsub_tick = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        # Тикаем 1 раз в секунду — но пишем в state ТОЛЬКО при смене строки.
-        self.async_on_remove(
-            async_track_time_interval(self.hass, self._tick, self._SYNC_INTERVAL)
-        )
+        self._schedule_tick(0.5)
+        self.async_on_remove(self._cancel_tick)
+
+    @callback
+    def _cancel_tick(self) -> None:
+        if self._unsub_tick is not None:
+            self._unsub_tick()
+            self._unsub_tick = None
+
+    @callback
+    def _schedule_tick(self, delay: float) -> None:
+        self._cancel_tick()
+        self._unsub_tick = async_call_later(self.hass, delay, self._tick)
 
     @callback
     def _tick(self, _now: datetime) -> None:
@@ -65,23 +80,33 @@ class SboomLyricsCurrentLineSensor(SboomEntity, SensorEntity):
         if line != self._last_line:
             self._last_line = line
             self.async_write_ha_state()
+        # Самопланирование на границу следующей строки (а не жёсткий 1s-тик):
+        # строка меняется без запаздывания до секунды.
+        self._schedule_tick(self._next_tick_delay())
+
+    def _next_tick_delay(self) -> float:
+        lyrics = self.coordinator.current_lyrics()
+        track = self.coordinator.track
+        pos = lyrics_position(self.coordinator)
+        if (
+            lyrics and lyrics.timeline
+            and track and track.playing
+            and pos is not None
+        ):
+            next_ts = next((ts for ts, _ in lyrics.timeline if ts > pos), None)
+            if next_ts is not None:
+                return min(2.0, max(0.25, next_ts - pos))
+        return 1.0
 
     def _compute_line(self) -> str | None:
         lyrics = self.coordinator.current_lyrics()
         if not lyrics or not lyrics.timeline:
             return None
-        pos = track_position(self.coordinator)
+        pos = lyrics_position(self.coordinator)
         if pos is None:
             return None
         line = current_line(lyrics.timeline, pos)
         return line[:255] if line else None
-
-    @property
-    def available(self) -> bool:
-        if not self.coordinator.connected:
-            return False
-        lyrics = self.coordinator.current_lyrics()
-        return bool(lyrics and lyrics.timeline)
 
     @property
     def native_value(self) -> str | None:

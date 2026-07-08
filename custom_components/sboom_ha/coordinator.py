@@ -28,10 +28,12 @@ from .const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_PORT,
+    DEFAULT_LYRICS_OFFSET,
     DEFAULT_VOLUME_POLL_INTERVAL,
     DOMAIN,
     LYRICS_CACHE_MAX,
     DEFAULT_LYRICS_ENABLED,
+    OPT_LYRICS_OFFSET,
     OPT_AVAILABILITY_THRESHOLD,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
@@ -82,6 +84,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             opts.get(OPT_AVAILABILITY_THRESHOLD, DEFAULT_AVAILABILITY_THRESHOLD)
         )
         self._lyrics_enabled = bool(opts.get(OPT_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED))
+        # Пользовательский сдвиг лирики (сек): + = строки раньше, − = позже.
+        self.lyrics_offset = float(opts.get(OPT_LYRICS_OFFSET, DEFAULT_LYRICS_OFFSET))
 
         super().__init__(
             hass,

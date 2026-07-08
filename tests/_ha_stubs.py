@@ -389,6 +389,11 @@ def async_track_time_interval(hass, fn, interval):
     return lambda: None
 
 
+def async_call_later(hass, delay, fn):
+    """Stub: не планирует — тесты зовут fn вручную. Возвращает cancel."""
+    return lambda: None
+
+
 class Store:
     """Минимальный стаб homeassistant.helpers.storage.Store (in-memory)."""
 
@@ -599,6 +604,7 @@ def install_stubs() -> None:
     _make_module(
         "homeassistant.helpers.event",
         async_track_time_interval=async_track_time_interval,
+        async_call_later=async_call_later,
     )
     _make_module("homeassistant.helpers.storage", Store=Store)
     _make_module("homeassistant.helpers.service_info")

@@ -13,8 +13,12 @@ _LOGGER = logging.getLogger(__name__)
 LRCLIB_BASE = "https://lrclib.net/api"
 USER_AGENT = "sboom_ha/HomeAssistant"
 
-# Парсер LRC-строк: [MM:SS.cc] текст  (или [MM:SS.ccc])
-_LRC_LINE = re.compile(r"^\[(\d{1,2}):(\d{2})\.(\d{2,3})](.*)$", flags=re.MULTILINE)
+# Таймстамп LRC: [MM:SS.cc] или [MM:SS.ccc]. Строка может начинаться с
+# НЕСКОЛЬКИХ таймстампов подряд ([00:10.00][01:30.00]Припев) — одна строка
+# текста на несколько моментов времени.
+_LRC_TS = re.compile(r"\[(\d{1,2}):(\d{2})\.(\d{2,3})\]")
+# Word-теги enhanced LRC внутри текста: <MM:SS.cc> — вычищаем.
+_LRC_WORD_TAG = re.compile(r"<\d{1,2}:\d{2}\.\d{2,3}>")
 
 
 @dataclass(slots=True)
@@ -28,13 +32,27 @@ class Lyrics:
 
 
 def _parse_lrc(synced: str) -> list[tuple[float, str]]:
-    """LRC → отсортированный по времени список (sec, text)."""
+    """LRC → отсортированный по времени список (sec, text).
+
+    Поддерживает multi-timestamp строки ([00:10.00][01:30.00]Припев — текст
+    попадает в обе точки) и вычищает word-теги enhanced LRC (<00:12.34>).
+    """
     out: list[tuple[float, str]] = []
-    for m in _LRC_LINE.finditer(synced):
-        mm, ss, cc, text = m.groups()
-        cs = int(cc) / (1000 if len(cc) == 3 else 100)
-        ts = int(mm) * 60 + int(ss) + cs
-        out.append((ts, text.strip()))
+    for line in synced.splitlines():
+        stamps: list[re.Match[str]] = []
+        end = 0
+        for m in _LRC_TS.finditer(line):
+            if m.start() != end:
+                break  # таймстампы только подряд в начале строки
+            stamps.append(m)
+            end = m.end()
+        if not stamps:
+            continue
+        text = _LRC_WORD_TAG.sub("", line[end:]).strip()
+        for m in stamps:
+            mm, ss, cc = m.groups()
+            cs = int(cc) / (1000 if len(cc) == 3 else 100)
+            out.append((int(mm) * 60 + int(ss) + cs, text))
     out.sort(key=lambda x: x[0])
     return out
 

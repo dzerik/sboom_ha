@@ -103,10 +103,15 @@ COVER_SIZE = "600x600"
 LYRICS_CACHE_MAX = 64
 
 # ─── Опции (entry.options), редактируются через Options Flow ───
-OPT_VOLUME_POLL_INTERVAL = "volume_poll_interval"      # секунды, default 5
+OPT_VOLUME_POLL_INTERVAL = "volume_poll_interval"      # секунды, default 15
 OPT_AVAILABILITY_THRESHOLD = "availability_threshold"  # подряд неудач, default 3
 OPT_KEEPALIVE_INTERVAL = "keepalive_interval"          # секунды, default 25
 OPT_LYRICS_ENABLED = "lyrics_enabled"                  # bool, default True
+OPT_LYRICS_OFFSET = "lyrics_offset"                    # сек, сдвиг лирики, default 0.0
+
+# Караоке-стрим: интервал кадров при активном воспроизведении (5 FPS —
+# достижимо после кэширования blur-фона и шрифтов; JPEG-encode 720p ~10-20 мс).
+LYRICS_FRAME_INTERVAL_SEC = 0.2
 
 # Default 15s — track changes приходят push-events через subscribe-stream
 # (см. research/PROTOCOL.md), polling нужен только для volume/mute которые
@@ -115,3 +120,4 @@ DEFAULT_VOLUME_POLL_INTERVAL = 15
 DEFAULT_AVAILABILITY_THRESHOLD = 3
 DEFAULT_KEEPALIVE_INTERVAL = 25
 DEFAULT_LYRICS_ENABLED = True
+DEFAULT_LYRICS_OFFSET = 0.0
