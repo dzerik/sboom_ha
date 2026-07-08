@@ -285,15 +285,25 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ───────────────────────── Zeroconf discovery ─────────────────────────
 
-    def _async_find_legacy_entry(self, host: str) -> config_entries.ConfigEntry | None:
+    def _async_find_legacy_entry(
+        self, host: str, device_id: str
+    ) -> config_entries.ConfigEntry | None:
         """Существующий entry этой же колонки с host-based unique_id.
 
-        Один IP — одна колонка, поэтому совпадение host достаточно. Сюда
-        попадаем только когда unique_id по device_id НЕ совпал ни с одним
+        Сюда попадаем только когда unique_id по device_id НЕ совпал ни с одним
         entry (иначе `_abort_if_unique_id_configured` уже прервал flow).
+
+        ВАЖНО: entry с CONF_DEVICE_ID другой колонки НЕ считается legacy, даже
+        при совпадении host. Иначе сценарий «колонка A переехала (DHCP), её
+        старый IP получила колонка B» перезаписал бы identity entry A данными
+        колонки B. Устаревший host entry A обновится при её собственном
+        discovery через штатную soft-migration.
         """
         legacy_uid = f"{DOMAIN}_{host}"
         for entry in self._async_current_entries(include_ignore=False):
+            known_id = entry.data.get(CONF_DEVICE_ID)
+            if known_id and known_id != device_id:
+                continue  # другая колонка — не трогаем
             if entry.unique_id == legacy_uid or entry.data.get(CONF_HOST) == host:
                 return entry
         return None
@@ -334,7 +344,7 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # устройство», подтверждение создаст дубликат с повторным pairing,
         # а при смене IP старый entry навсегда останется на мёртвом адресе.
         # Находим такой entry по host и переводим на device_id-unique_id.
-        legacy = self._async_find_legacy_entry(host)
+        legacy = self._async_find_legacy_entry(host, device_id)
         if legacy is not None:
             _LOGGER.info(
                 "migrating legacy entry %s (unique_id=%s) to unique_id=%s",

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import random
 import time
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -35,7 +36,9 @@ from .const import (
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
     OPT_VOLUME_POLL_INTERVAL,
+    POLL_FAILURES_BEFORE_RECONNECT,
     RECONNECT_BACKOFF_SEC,
+    STABLE_SESSION_SEC,
 )
 
 # Event types для HA event bus.
@@ -106,6 +109,9 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
         self._stopping = False
+        # Подряд идущие полностью неудачные poll-циклы при живом на вид сокете —
+        # страховка от half-open, который не поймал транспортный WS ping.
+        self._poll_failures = 0
 
         # Lyrics: кэш track_id -> Lyrics (None = ищется/не нашли).
         self.lyrics_by_track: dict[str, Lyrics | None] = {}
@@ -155,8 +161,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         await self.client.connect()
         self.client.start_listening()
+        # Строгая проверка: соединение считается рабочим только после первого
+        # успешного запроса. Иначе колонка, принимающая WS, но не отвечающая
+        # (например, отозванный токен), выглядела бы «подключённой».
+        self.state = await self.client.get_state()
+        self._poll_failures = 0
         self._set_connected(True)
-        _LOGGER.info("connected to %s", self.client.host)
+        _LOGGER.debug("connected to %s", self.client.host)
         await self._refresh_state_and_track()
 
     async def async_stop(self) -> None:
@@ -172,13 +183,14 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _supervisor(self) -> None:
         attempt = 0
         while not self._stopping:
+            session_started: float | None = None
             try:
                 # Первый заход: connect уже выполнен синхронно в async_start,
                 # соединение живое — пропускаем. Последующие заходы (после
                 # обрыва) — реконнектимся.
                 if self.client.disconnected.is_set():
                     await self._connect_and_sync()
-                attempt = 0
+                session_started = time.monotonic()
 
                 # Держим соединение через KeepAlive. Track-changes приходят
                 # push-events через _handle_event (см. ниже).
@@ -191,34 +203,44 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             self.client.disconnected.wait(),
                             timeout=self._keepalive_interval,
                         )
-                        _LOGGER.info("WS-обрыв замечен listen-loop'ом — reconnect")
+                        _LOGGER.debug("WS-обрыв замечен listen-loop'ом — reconnect")
                         break
                     except asyncio.TimeoutError:
                         pass  # keepalive-интервал прошёл штатно
                     try:
                         await self.client.keep_alive()
                     except Exception as exc:
-                        _LOGGER.warning("keepalive failed (%s), dropping connection", exc)
+                        _LOGGER.debug("keepalive failed (%s), dropping connection", exc)
                         break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                _LOGGER.warning("WS error: %s", exc)
+                _LOGGER.debug("WS error: %s", exc)
             finally:
                 await self.client.close()
 
             if self._stopping:
                 break
 
+            # Backoff-серия сбрасывается только если сессия прожила достаточно
+            # долго. Flapping (connect проходит, но сразу рвётся) продолжает
+            # эскалацию и в итоге честно помечает колонку недоступной.
+            if (
+                session_started is not None
+                and time.monotonic() - session_started >= STABLE_SESSION_SEC
+            ):
+                attempt = 0
+
             attempt += 1
             # после N подряд неудач помечаем колонку недоступной
+            # (лог — один раз, при переходе connected → False внутри _set_connected)
             if attempt >= self._availability_threshold:
                 self._set_connected(False)
                 self._maybe_create_unreachable_issue()
 
             backoff = RECONNECT_BACKOFF_SEC[min(attempt - 1, len(RECONNECT_BACKOFF_SEC) - 1)]
             backoff = backoff + random.uniform(0, backoff * 0.3)
-            _LOGGER.info("reconnect in %.1fs (attempt %d)", backoff, attempt)
+            _LOGGER.debug("reconnect in %.1fs (attempt %d)", backoff, attempt)
             try:
                 await asyncio.sleep(backoff)
             except asyncio.CancelledError:
@@ -305,21 +327,45 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     continue
         _LOGGER.debug("lyrics cache loaded: %d entries", len(self.lyrics_by_track))
 
+    # ─────────────────────── optimistic updates ───────────────────────
+
+    def apply_optimistic_state(self, **changes: Any) -> None:
+        """Локально патчит SpeakerState сразу после успешной команды.
+
+        Volume/mute НЕ приходят push'ем, а poll идёт раз в N секунд — без
+        optimistic-патча повторные команды (volume_up × 3) читали бы
+        устаревшее значение и не аккумулировались. Следующий poll подтвердит.
+        """
+        if self.state is None:
+            return
+        self.state = replace(self.state, **changes)
+        self.async_update_listeners()
+
+    def apply_optimistic_track(self, **changes: Any) -> None:
+        """Локально патчит TrackInfo после команды (play/pause/shuffle/repeat)."""
+        if self.track is None:
+            return
+        self.track = replace(self.track, **changes)
+        self.async_update_listeners()
+
     # ─────────────────────── data handlers ───────────────────────
 
     async def _refresh_state_and_track(self) -> None:
         prev_track = self.track
         prev_state = self.state
+        poll_ok = False
         try:
             self.state = await self.client.get_state()
+            poll_ok = True
             _LOGGER.debug("get_state -> volume=%s muted=%s",
                           self.state.volume_percent if self.state else "?",
                           self.state.muted if self.state else "?")
         except Exception as exc:
             # Обрыв в процессе poll'а — штатно, супервизор реконнектит.
-            _LOGGER.warning("get_state failed: %s", exc)
+            _LOGGER.debug("get_state failed: %s", exc)
         try:
             self.track = await self.client.get_metadata()
+            poll_ok = True
             self._maybe_fetch_lyrics()
             if self.track:
                 _LOGGER.debug(
@@ -331,13 +377,29 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.track.duration_sec, self.track.provider,
                 )
             else:
-                _LOGGER.warning("get_metadata returned None — парсер не нашёл trackId")
+                _LOGGER.debug("get_metadata returned None — парсер не нашёл trackId")
         except Exception as exc:
-            _LOGGER.warning("get_metadata failed: %s", exc)
+            _LOGGER.debug("get_metadata failed: %s", exc)
         try:
             self.paired_bt = await self.client.get_paired_bt_devices()
         except Exception as exc:
             _LOGGER.debug("get_paired_bt_devices failed: %s", exc)
+
+        # Страховка от half-open: сокет выглядит живым, но все запросы
+        # таймаутят. N подряд полностью неудачных циклов → принудительный
+        # close(), супервизор поднимет соединение заново.
+        if poll_ok:
+            self._poll_failures = 0
+        else:
+            self._poll_failures += 1
+            if self._poll_failures >= POLL_FAILURES_BEFORE_RECONNECT:
+                _LOGGER.debug(
+                    "%d подряд неудачных poll-циклов — принудительный reconnect",
+                    self._poll_failures,
+                )
+                self._poll_failures = 0
+                await self.client.close()
+
         self._fire_change_events(prev_track, prev_state)
         self.async_set_updated_data({"state": self.state, "track": self.track})
 
@@ -371,14 +433,25 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ─────────────────────── event bus ───────────────────────
 
     def _set_connected(self, connected: bool) -> None:
-        """Обновить флаг доступности и стрельнуть событием при изменении."""
+        """Обновить флаг доступности и стрельнуть событием при изменении.
+
+        Логи — только на переходах (IQS log-when-unavailable): одно WARNING
+        при потере связи, одно INFO при восстановлении. Отдельные reconnect-
+        попытки логируются на DEBUG в супервизоре.
+        """
         if self.connected == connected:
             return
         self.connected = connected
         if connected:
+            _LOGGER.info("связь с колонкой %s установлена", self.client.host)
             self._unreachable_since = None
             self._clear_unreachable_issue()
         else:
+            if not self._stopping:
+                _LOGGER.warning(
+                    "колонка %s недоступна — реконнект продолжается в фоне",
+                    self.client.host,
+                )
             self._unreachable_since = time.monotonic()
         self.hass.bus.async_fire(EVENT_CONNECTION_CHANGED, {
             **self._event_payload_base(),

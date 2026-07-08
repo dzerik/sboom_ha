@@ -26,6 +26,8 @@ from ._tlv import field as _field
 from .const import (
     DEFAULT_PORT,
     DEFAULT_USER_AGENT,
+    WS_PING_INTERVAL_SEC,
+    WS_PING_TIMEOUT_SEC,
     MEDIA_CMD_DISLIKE,
     MEDIA_CMD_LIKE,
     MEDIA_CMD_MUTE,
@@ -147,7 +149,11 @@ class SberSpeakerClient:
             "ssl": ssl_ctx,
             "max_size": 2**20,
             "open_timeout": 10,
-            "ping_interval": None,
+            # Транспортный heartbeat: pong обязателен по RFC 6455, поэтому
+            # безответный ping = half-open TCP → библиотека сама закрывает
+            # соединение, _listen_loop завершается, супервизор реконнектит.
+            "ping_interval": WS_PING_INTERVAL_SEC,
+            "ping_timeout": WS_PING_TIMEOUT_SEC,
             _HEADERS_KWARG: [("User-Agent", DEFAULT_USER_AGENT)],
         }
         self._ws = await websockets.connect(url, **connect_kwargs)
@@ -222,7 +228,9 @@ class SberSpeakerClient:
                 break
             msg_idx += 1
             parsed = _decode_tlv(resp if isinstance(resp, (bytes, bytearray)) else resp.encode())
-            _LOGGER.info("pair: msg #%d (%d bytes) parsed=%s", msg_idx, len(resp), parsed)
+            # ВАЖНО: сырые parsed-поля pair-ответов НЕ логировать — они содержат
+            # pin-токен (полный доступ к колонке), а лог часто прикладывают к issue.
+            _LOGGER.debug("pair: msg #%d (%d bytes)", msg_idx, len(resp))
 
             req_data = parsed.get(5)
             if not isinstance(req_data, dict):
@@ -240,7 +248,7 @@ class SberSpeakerClient:
                 if status == 2:
                     token = pin_resp.get(2)
                     if isinstance(token, str) and len(token) >= 16:
-                        _LOGGER.info("pair: token received (init-stage) -> %s", token)
+                        _LOGGER.info("pair: token received (init-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
                 elif status == 1:
@@ -264,7 +272,7 @@ class SberSpeakerClient:
                 if status == 1:
                     token = confirm.get(2)
                     if isinstance(token, str) and len(token) >= 16:
-                        _LOGGER.info("pair: token received (confirm-stage) -> %s", token)
+                        _LOGGER.info("pair: token received (confirm-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
                 elif status == 2:
@@ -409,20 +417,25 @@ class SberSpeakerClient:
         return b"".join(parts)
 
     async def _fire_and_forget(self, request_data: bytes) -> None:
-        if not self._ws:
+        # Локальная ссылка: параллельный close() может обнулить self._ws
+        # между проверкой и send — тогда был бы AttributeError вместо
+        # ConnectionClosed, который супервизор умеет обрабатывать.
+        ws = self._ws
+        if not ws:
             raise RuntimeError("not connected")
         async with self._lock:
-            await self._ws.send(self._envelope(str(uuid.uuid4()), request_data))
+            await ws.send(self._envelope(str(uuid.uuid4()), request_data))
 
     async def _request_response(self, request_data: bytes, timeout: float = 5.0) -> bytes:
-        if not self._ws:
+        ws = self._ws
+        if not ws:
             raise RuntimeError("not connected")
         req_id = str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[req_id] = fut
         try:
             async with self._lock:
-                await self._ws.send(self._envelope(req_id, request_data))
+                await ws.send(self._envelope(req_id, request_data))
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(req_id, None)

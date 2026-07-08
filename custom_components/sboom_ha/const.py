@@ -13,12 +13,24 @@ CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_NAME = "client_name"
 CONF_PIN_ACCESS_TOKEN = "pin_access_token"
 
-# Fallback значение шкалы громкости (0-100)
-VOLUME_SCALE_MAX = 100
-
 # Интервалы
 RECONNECT_BACKOFF_SEC  = (1, 2, 5, 10, 30, 60)
 PAIR_BUTTON_TIMEOUT_SEC = 120   # сколько ждать нажатия "+" на колонке
+
+# WS ping/pong — транспортный heartbeat: детектит half-open TCP (колонка
+# обесточена без FIN/RST), при котором send() успешен, а связи давно нет.
+WS_PING_INTERVAL_SEC = 20
+WS_PING_TIMEOUT_SEC  = 10
+
+# Сессия считается стабильной, только если прожила столько секунд — иначе
+# reconnect-backoff не сбрасывается. Без этого flapping-соединение (connect
+# проходит, но сразу рвётся) даёт вечный tight-loop реконнектов раз в 1-2 с,
+# при котором порог недоступности никогда не срабатывает.
+STABLE_SESSION_SEC = 30
+
+# Столько подряд полностью неудачных poll-циклов при живом (на вид) сокете →
+# принудительный reconnect: страховка от half-open, не пойманного WS ping.
+POLL_FAILURES_BEFORE_RECONNECT = 2
 
 # Опкоды операций (теги полей в request_data).
 OP_PIN_CONNECT       = 4
