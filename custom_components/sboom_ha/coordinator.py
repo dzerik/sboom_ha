@@ -405,6 +405,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "name": self.entry.data.get("device_name") or self.entry.data.get(CONF_HOST, "speaker"),
                 "minutes": str(int(elapsed // 60)),
             },
+            # entry_id нужен fix-flow (repairs.py), чтобы обновить host у entry.
+            data={"entry_id": self.entry.entry_id},
         )
 
     def _clear_unreachable_issue(self) -> None:

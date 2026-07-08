@@ -10,7 +10,7 @@
   "issue_tracker": "https://github.com/TohaRG2/issues",
   "quality_scale": "silver",
   "requirements": ["websockets>=13.0", "Pillow>=10.0"],
-  "version": "0.11.1",
+  "version": "0.12.0",
   "zeroconf": [
     { "type": "_staros._tcp.local." }
   ]

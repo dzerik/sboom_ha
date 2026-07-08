@@ -128,6 +128,10 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._host = user_input[CONF_HOST]
             self._port = user_input.get(CONF_PORT, DEFAULT_PORT)
             self._client_name = user_input.get(CONF_CLIENT_NAME, self._client_name)
+            # Entry, добавленный через discovery, имеет unique_id по device_id —
+            # host-based unique_id ниже его не поймает. Сверяем по host, иначе
+            # ручной ввод IP уже настроенной колонки создаст дубликат.
+            self._async_abort_entries_match({CONF_HOST: self._host})
             await self.async_set_unique_id(f"{DOMAIN}_{self._host}")
             self._abort_if_unique_id_configured()
             return await self.async_step_pair()
@@ -245,6 +249,14 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 errors["base"] = "cannot_connect"
             else:
+                # Legacy unique_id привязан к старому IP: без обновления он
+                # навсегда «занимает» старый адрес — добавление другой колонки
+                # на нём упрётся в ложный already_configured.
+                old_host = entry.data.get(CONF_HOST)
+                if entry.unique_id == f"{DOMAIN}_{old_host}" and new_host != old_host:
+                    self.hass.config_entries.async_update_entry(
+                        entry, unique_id=f"{DOMAIN}_{new_host}"
+                    )
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={CONF_HOST: new_host, CONF_PORT: new_port},
@@ -272,6 +284,19 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # ───────────────────────── Zeroconf discovery ─────────────────────────
+
+    def _async_find_legacy_entry(self, host: str) -> config_entries.ConfigEntry | None:
+        """Существующий entry этой же колонки с host-based unique_id.
+
+        Один IP — одна колонка, поэтому совпадение host достаточно. Сюда
+        попадаем только когда unique_id по device_id НЕ совпал ни с одним
+        entry (иначе `_abort_if_unique_id_configured` уже прервал flow).
+        """
+        legacy_uid = f"{DOMAIN}_{host}"
+        for entry in self._async_current_entries(include_ignore=False):
+            if entry.unique_id == legacy_uid or entry.data.get(CONF_HOST) == host:
+                return entry
+        return None
 
     async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> FlowResult:
         """Колонка обнаружена через mDNS (_staros._tcp.local.)."""
@@ -303,6 +328,26 @@ class SboomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if device_model:
             updates[CONF_DEVICE_MODEL] = device_model
         self._abort_if_unique_id_configured(updates=updates, reload_on_update=True)
+
+        # Healing: entry, добавленный вручную, имеет unique_id по IP и не
+        # матчится по device_id выше. Без миграции HA предложит «новое
+        # устройство», подтверждение создаст дубликат с повторным pairing,
+        # а при смене IP старый entry навсегда останется на мёртвом адресе.
+        # Находим такой entry по host и переводим на device_id-unique_id.
+        legacy = self._async_find_legacy_entry(host)
+        if legacy is not None:
+            _LOGGER.info(
+                "migrating legacy entry %s (unique_id=%s) to unique_id=%s",
+                legacy.entry_id, legacy.unique_id, self.unique_id,
+            )
+            new_data = {**legacy.data, **updates, CONF_DEVICE_ID: device_id}
+            if device_name and not legacy.data.get(CONF_DEVICE_NAME):
+                new_data[CONF_DEVICE_NAME] = device_name
+            self.hass.config_entries.async_update_entry(
+                legacy, unique_id=self.unique_id, data=new_data
+            )
+            self.hass.config_entries.async_schedule_reload(legacy.entry_id)
+            return self.async_abort(reason="already_configured")
 
         self._host = host
         self._port = port

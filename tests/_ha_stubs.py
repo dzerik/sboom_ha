@@ -100,12 +100,42 @@ class _FakeServices:
         self._registered[(domain, service)] = handler
 
 
+class _FakeConfigEntries:
+    """Stub hass.config_entries: get/update/schedule_reload для repairs-flow."""
+
+    def __init__(self) -> None:
+        self._entries: dict[str, Any] = {}
+        self.reloaded: list[str] = []
+
+    def add(self, entry) -> None:
+        self._entries[entry.entry_id] = entry
+
+    def async_get_entry(self, entry_id: str):
+        return self._entries.get(entry_id)
+
+    def async_update_entry(
+        self, entry, *, data=None, options=None, unique_id=None, title=None
+    ) -> None:
+        if data is not None:
+            entry.data = dict(data)
+        if options is not None:
+            entry.options = dict(options)
+        if unique_id is not None:
+            entry.unique_id = unique_id
+        if title is not None:
+            entry.title = title
+
+    def async_schedule_reload(self, entry_id: str) -> None:
+        self.reloaded.append(entry_id)
+
+
 class HomeAssistant:
-    """Stub HA: только bus + data + services + create_background_task."""
+    """Stub HA: bus + data + services + config_entries + create_background_task."""
 
     def __init__(self) -> None:
         self.bus = _FakeBus()
         self.services = _FakeServices()
+        self.config_entries = _FakeConfigEntries()
         self.data: dict[str, Any] = {}
         self._tasks: list[Any] = []
 
@@ -130,6 +160,7 @@ class ConfigEntry:
         title: str = "Test Entry",
         version: int = 1,
         minor_version: int = 1,
+        unique_id: str | None = None,
     ) -> None:
         self.data = dict(data or {})
         self.options = dict(options or {})
@@ -137,6 +168,7 @@ class ConfigEntry:
         self.title = title
         self.version = version
         self.minor_version = minor_version
+        self.unique_id = unique_id
 
     def async_on_unload(self, fn) -> None:
         pass
@@ -203,6 +235,7 @@ def async_create_issue(
         "severity": severity,
         "translation_key": translation_key,
         "translation_placeholders": dict(translation_placeholders or {}),
+        "data": kwargs.get("data"),
     }
 
 
@@ -213,7 +246,26 @@ def async_delete_issue(hass, domain: str, issue_id: str) -> None:
 # ── components.repairs ──────────────────────────────────────────────────
 
 class RepairsFlow:
-    """Stub базового класса."""
+    """Stub базового класса: минимальные async_show_form/async_create_entry."""
+
+    def async_show_form(
+        self,
+        *,
+        step_id: str,
+        data_schema: Any = None,
+        errors: dict[str, str] | None = None,
+        description_placeholders: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": dict(errors or {}),
+            "description_placeholders": dict(description_placeholders or {}),
+        }
+
+    def async_create_entry(self, *, title: str = "", data: dict | None = None) -> dict[str, Any]:
+        return {"type": "create_entry", "title": title, "data": dict(data or {})}
 
 
 class ConfirmRepairFlow(RepairsFlow):

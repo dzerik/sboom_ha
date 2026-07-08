@@ -43,7 +43,22 @@
   "issues": {
     "speaker_unreachable": {
       "title": "Колонка {name} недоступна",
-      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — перенастройте через Settings → Integrations → SBoom → ⋮ → Reconfigure."
+      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — перенастройте через Settings → Integrations → SBoom → ⋮ → Reconfigure.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Колонка {name} недоступна",
+            "description": "Если колонка получила новый IP-адрес (например, от DHCP) — введите его ниже: pair-токен сохраняется, повторное сопряжение не нужно. Убедитесь, что колонка включена и доступна из сети Home Assistant.",
+            "data": {
+              "host": "IP-адрес",
+              "port": "Порт"
+            }
+          }
+        },
+        "error": {
+          "cannot_connect": "Не удалось подключиться по этому адресу. Проверьте IP/порт и доступность колонки в локальной сети."
+        }
+      }
     }
   },
   "options": {
@@ -62,30 +77,54 @@
   },
   "entity": {
     "button": {
-      "next_track":      { "name": "Следующий трек" },
-      "previous_track":  { "name": "Предыдущий трек" },
-      "play_pause":      { "name": "Воспроизведение / Пауза" },
-      "like":            { "name": "Лайк текущему треку" },
-      "dislike":         { "name": "Дизлайк текущему треку" },
-      "remove_like":     { "name": "Убрать лайк" },
-      "remove_dislike":  { "name": "Убрать дизлайк" },
-      "bt_pairing":      { "name": "Bluetooth-сопряжение" },
-      "find_remote":     { "name": "Найти пульт" }
+      "next_track": {
+        "name": "Следующий трек"
+      },
+      "previous_track": {
+        "name": "Предыдущий трек"
+      },
+      "play_pause": {
+        "name": "Воспроизведение / Пауза"
+      },
+      "like": {
+        "name": "Лайк текущему треку"
+      },
+      "dislike": {
+        "name": "Дизлайк текущему треку"
+      },
+      "remove_like": {
+        "name": "Убрать лайк"
+      },
+      "remove_dislike": {
+        "name": "Убрать дизлайк"
+      },
+      "bt_pairing": {
+        "name": "Bluetooth-сопряжение"
+      },
+      "find_remote": {
+        "name": "Найти пульт"
+      }
     },
     "number": {
-      "volume": { "name": "Громкость" }
+      "volume": {
+        "name": "Громкость"
+      }
     },
     "switch": {
-      "shuffle": { "name": "Перемешивание" },
-      "mute":    { "name": "Без звука" }
+      "shuffle": {
+        "name": "Перемешивание"
+      },
+      "mute": {
+        "name": "Без звука"
+      }
     },
     "select": {
       "repeat": {
         "name": "Режим повтора",
         "state": {
-          "off":       "Выкл.",
-          "playlist":  "Плейлист",
-          "track":     "Трек"
+          "off": "Выкл.",
+          "playlist": "Плейлист",
+          "track": "Трек"
         }
       },
       "playback_speed": {
@@ -93,27 +132,61 @@
       }
     },
     "sensor": {
-      "lyrics_current_line":  { "name": "Текущая строка lyrics" },
-      "lyrics":               { "name": "Lyrics" },
-      "led_brightness":       { "name": "Яркость дисплея" },
-      "alarms":               { "name": "Будильники" },
-      "timers":               { "name": "Таймеры" },
-      "active_app":           { "name": "Активное приложение" },
-      "assistant_character":  { "name": "Персона ассистента" },
-      "multiroom_mode":       { "name": "Режим multiroom" },
-      "network_type":         { "name": "Тип подключения" },
-      "paired_bt":            { "name": "Спаренные Bluetooth-устройства" }
+      "lyrics_current_line": {
+        "name": "Текущая строка lyrics"
+      },
+      "lyrics": {
+        "name": "Lyrics"
+      },
+      "led_brightness": {
+        "name": "Яркость дисплея"
+      },
+      "alarms": {
+        "name": "Будильники"
+      },
+      "timers": {
+        "name": "Таймеры"
+      },
+      "active_app": {
+        "name": "Активное приложение"
+      },
+      "assistant_character": {
+        "name": "Персона ассистента"
+      },
+      "multiroom_mode": {
+        "name": "Режим multiroom"
+      },
+      "network_type": {
+        "name": "Тип подключения"
+      },
+      "paired_bt": {
+        "name": "Спаренные Bluetooth-устройства"
+      }
     },
     "binary_sensor": {
-      "led_display":          { "name": "Дисплей" },
-      "active":               { "name": "Активна" },
-      "stereo_pair":          { "name": "Стереопара" },
-      "subscription_device":  { "name": "Устройство подписки" },
-      "home_security":        { "name": "Домашняя безопасность" },
-      "morning_show":         { "name": "Утреннее шоу" }
+      "led_display": {
+        "name": "Дисплей"
+      },
+      "active": {
+        "name": "Активна"
+      },
+      "stereo_pair": {
+        "name": "Стереопара"
+      },
+      "subscription_device": {
+        "name": "Устройство подписки"
+      },
+      "home_security": {
+        "name": "Домашняя безопасность"
+      },
+      "morning_show": {
+        "name": "Утреннее шоу"
+      }
     },
     "camera": {
-      "lyrics_camera": { "name": "Lyrics на ТВ" }
+      "lyrics_camera": {
+        "name": "Lyrics на ТВ"
+      }
     }
   },
   "exceptions": {
