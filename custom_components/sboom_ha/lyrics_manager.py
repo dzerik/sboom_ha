@@ -41,12 +41,14 @@ class LyricsManager:
         http_session: aiohttp.ClientSession,
         *,
         enabled: bool,
+        netease_fallback: bool = True,
         on_update: Callable[[], None],
     ) -> None:
         self._hass = hass
         self._entry = entry
         self._http = http_session
         self._enabled = enabled
+        self._netease_fallback = netease_fallback
         self._on_update = on_update
         self.by_track: dict[str, Lyrics | None] = {}
         self._inflight: set[str] = set()
@@ -101,7 +103,10 @@ class LyricsManager:
         duration_sec: int | None,
     ) -> None:
         try:
-            result = await fetch_lyrics(self._http, title, artist, album, duration_sec)
+            result = await fetch_lyrics(
+                self._http, title, artist, album, duration_sec,
+                use_netease=self._netease_fallback,
+            )
             if result is None:
                 # Сетевая ошибка — НЕ кэшируем, дадим retry при следующем track-update.
                 _LOGGER.debug("lyrics fetch error for %s — will retry later", track_id)

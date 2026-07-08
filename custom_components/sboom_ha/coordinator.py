@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
+    DEFAULT_LYRICS_NETEASE,
     DEFAULT_LYRICS_OFFSET,
     DEFAULT_PORT,
     DEFAULT_VOLUME_POLL_INTERVAL,
@@ -37,6 +38,7 @@ from .const import (
     OPT_AVAILABILITY_THRESHOLD,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
+    OPT_LYRICS_NETEASE,
     OPT_LYRICS_OFFSET,
     OPT_VOLUME_POLL_INTERVAL,
     POLL_FAILURES_BEFORE_RECONNECT,
@@ -81,6 +83,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             opts.get(OPT_AVAILABILITY_THRESHOLD, DEFAULT_AVAILABILITY_THRESHOLD)
         )
         self._lyrics_enabled = bool(opts.get(OPT_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED))
+        self._lyrics_netease = bool(opts.get(OPT_LYRICS_NETEASE, DEFAULT_LYRICS_NETEASE))
         # Пользовательский сдвиг лирики (сек): + = строки раньше, − = позже.
         self.lyrics_offset = float(opts.get(OPT_LYRICS_OFFSET, DEFAULT_LYRICS_OFFSET))
 
@@ -119,6 +122,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.lyrics = LyricsManager(
             hass, entry, self._http,
             enabled=self._lyrics_enabled,
+            netease_fallback=self._lyrics_netease,
             on_update=self.async_update_listeners,
         )
 

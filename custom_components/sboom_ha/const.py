@@ -134,16 +134,19 @@ OPT_AVAILABILITY_THRESHOLD = "availability_threshold"  # подряд неуда
 OPT_KEEPALIVE_INTERVAL = "keepalive_interval"          # секунды, default 25
 OPT_LYRICS_ENABLED = "lyrics_enabled"                  # bool, default True
 OPT_LYRICS_OFFSET = "lyrics_offset"                    # сек, сдвиг лирики, default 0.0
+OPT_LYRICS_NETEASE = "lyrics_netease_fallback"         # bool: NetEase как резерв, default True
 
 # Караоке-стрим: интервал кадров при активном воспроизведении (5 FPS —
 # достижимо после кэширования blur-фона и шрифтов; JPEG-encode 720p ~10-20 мс).
 LYRICS_FRAME_INTERVAL_SEC = 0.2
 
 # Default 15s — track changes приходят push-events через subscribe-stream
-# (см. research/PROTOCOL.md), polling нужен только для volume/mute которые
-# в push-stream НЕ попадают.
+# (см. research/PROTOCOL.md); volume/mute добираем поллингом. Пушится ли
+# громкость — вопрос открытый (research-доки противоречат друг другу),
+# см. DEBUG-лог «state-push получен» в coordinator._handle_event.
 DEFAULT_VOLUME_POLL_INTERVAL = 15
 DEFAULT_AVAILABILITY_THRESHOLD = 3
 DEFAULT_KEEPALIVE_INTERVAL = 25
 DEFAULT_LYRICS_ENABLED = True
 DEFAULT_LYRICS_OFFSET = 0.0
+DEFAULT_LYRICS_NETEASE = True

@@ -13,6 +13,17 @@ _LOGGER = logging.getLogger(__name__)
 LRCLIB_BASE = "https://lrclib.net/api"
 USER_AGENT = "sboom_ha/HomeAssistant"
 
+# NetEase Cloud Music — резервный источник synced-текстов (публичные
+# JSON-endpoints без авторизации). Порядок цепочки: LRCLIB → NetEase.
+NETEASE_SEARCH_URL = "https://music.163.com/api/search/get"
+NETEASE_LYRIC_URL = "https://music.163.com/api/song/lyric"
+_NETEASE_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Referer": "https://music.163.com/",
+}
+# Допустимое расхождение длительности при матчинге трека в выдаче поиска.
+_NETEASE_DURATION_TOLERANCE_SEC = 7
+
 # Таймстамп LRC: [MM:SS.cc] или [MM:SS.ccc]. Строка может начинаться с
 # НЕСКОЛЬКИХ таймстампов подряд ([00:10.00][01:30.00]Припев) — одна строка
 # текста на несколько моментов времени.
@@ -111,19 +122,16 @@ async def _request_get(
         return None
 
 
-async def fetch_lyrics(
+async def _fetch_lrclib(
     session: aiohttp.ClientSession,
     track: str,
     artist: str,
-    album: str | None = None,
-    duration_sec: int | None = None,
-    timeout: float = 6.0,
-    retries: int = 2,
-) -> Lyrics | None:
-    """Запрос lyrics в Lrclib с retry. Сначала с album+duration, fallback без них."""
-    if not track or not artist:
-        return None
-
+    album: str | None,
+    duration_sec: int | None,
+    timeout: float,
+    retries: int,
+) -> tuple[Lyrics | None, bool]:
+    """Lrclib с retry. Возвращает (lyrics | None, была_ли_сетевая_ошибка)."""
     # Пробы: (a) полные параметры, (b) только track+artist (некоторые песни в lrclib
     # без album metadata).
     attempts: list[tuple[str | None, int | None]] = [(album, duration_sec)]
@@ -147,19 +155,161 @@ async def fetch_lyrics(
             plain = data.get("plainLyrics") or None
             synced = data.get("syncedLyrics") or None
             timeline = _parse_lrc(synced) if synced else None
-            return Lyrics(
-                plain=plain,
-                synced=synced,
-                instrumental=bool(data.get("instrumental")),
-                source="lrclib",
-                timeline=timeline,
+            return (
+                Lyrics(
+                    plain=plain,
+                    synced=synced,
+                    instrumental=bool(data.get("instrumental")),
+                    source="lrclib",
+                    timeline=timeline,
+                ),
+                network_err,
             )
-
-    # Дошли сюда — все варианты дали 404 или network err.
     if network_err:
         _LOGGER.warning("lrclib all retries failed for %r — %r", track, artist)
+    else:
+        _LOGGER.debug("lrclib not_found %r — %r", track, artist)
+    return None, network_err
+
+
+def _norm(s: str) -> str:
+    """Нормализация для нечёткого сравнения названий: только буквы/цифры, lower."""
+    return re.sub(r"[^\w]+", "", s.lower(), flags=re.UNICODE)
+
+
+def _pick_netease_song(
+    songs: list[dict], track: str, artist: str, duration_sec: int | None
+) -> int | None:
+    """Выбор трека из выдачи поиска NetEase: совпадение названия и артиста,
+    длительность в пределах допуска (если известна)."""
+    want_track = _norm(track)
+    want_artist = _norm(artist)
+    for song in songs:
+        if not isinstance(song, dict) or "id" not in song:
+            continue
+        name = _norm(str(song.get("name") or ""))
+        if not name or (want_track not in name and name not in want_track):
+            continue
+        artists = [
+            _norm(str(a.get("name") or ""))
+            for a in (song.get("artists") or [])
+            if isinstance(a, dict)
+        ]
+        if want_artist and artists and not any(
+            a and (a in want_artist or want_artist in a) for a in artists
+        ):
+            continue
+        dur_ms = song.get("duration")
+        if duration_sec and isinstance(dur_ms, (int, float)) and dur_ms > 0:
+            if abs(dur_ms / 1000 - duration_sec) > _NETEASE_DURATION_TOLERANCE_SEC:
+                continue
+        return int(song["id"])
+    return None
+
+
+async def _fetch_netease(
+    session: aiohttp.ClientSession,
+    track: str,
+    artist: str,
+    duration_sec: int | None,
+    timeout: float,
+) -> tuple[Lyrics | None, bool]:
+    """NetEase: поиск трека → lyric-endpoint. (lyrics | None, network_err)."""
+    try:
+        async with session.get(
+            NETEASE_SEARCH_URL,
+            params={"s": f"{track} {artist}", "type": "1", "limit": "10", "offset": "0"},
+            headers=_NETEASE_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as r:
+            if r.status == 404:
+                return None, False  # «не найдено», а не сбой — кэшируем маркер
+            if r.status != 200:
+                _LOGGER.debug("netease search HTTP %s for %r — %r", r.status, track, artist)
+                return None, True
+            data = await r.json(content_type=None)
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
+        _LOGGER.debug("netease search err: %s", exc.__class__.__name__)
+        return None, True
+
+    songs = ((data or {}).get("result") or {}).get("songs") or []
+    song_id = _pick_netease_song(songs, track, artist, duration_sec)
+    if song_id is None:
+        _LOGGER.debug("netease not_found %r — %r", track, artist)
+        return None, False
+
+    try:
+        async with session.get(
+            NETEASE_LYRIC_URL,
+            params={"id": str(song_id), "lv": "1", "kv": "-1", "tv": "-1"},
+            headers=_NETEASE_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as r:
+            if r.status != 200:
+                return None, True
+            data = await r.json(content_type=None)
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
+        _LOGGER.debug("netease lyric err: %s", exc.__class__.__name__)
+        return None, True
+
+    lrc = ((data or {}).get("lrc") or {}).get("lyric") or None
+    if not lrc:
+        return None, False
+    timeline = _parse_lrc(lrc)
+    if not timeline:
+        # LRC без таймстампов — годится только как plain-текст.
+        return Lyrics(plain=lrc, synced=None, instrumental=False,
+                      source="netease", timeline=None), False
+    plain = "\n".join(text for _ts, text in timeline if text) or None
+    return Lyrics(plain=plain, synced=lrc, instrumental=False,
+                  source="netease", timeline=timeline), False
+
+
+async def fetch_lyrics(
+    session: aiohttp.ClientSession,
+    track: str,
+    artist: str,
+    album: str | None = None,
+    duration_sec: int | None = None,
+    timeout: float = 6.0,
+    retries: int = 2,
+    use_netease: bool = True,
+) -> Lyrics | None:
+    """Цепочка провайдеров: LRCLIB → NetEase (резерв).
+
+    Приоритет — synced-текст: instrumental или synced от LRCLIB возвращаются
+    сразу; plain-only результат придерживается как «лучший найденный», пока
+    NetEase не даст synced. None — только при сетевых ошибках без результата
+    (caller ретраит на следующем track-update); «нигде не нашли» — пустой
+    Lyrics-маркер (кэшируется, чтобы не долбить API на каждый poll).
+    """
+    if not track or not artist:
+        return None
+
+    network_err = False
+    best: Lyrics | None = None
+
+    lrclib, err = await _fetch_lrclib(
+        session, track, artist, album, duration_sec, timeout, retries
+    )
+    network_err |= err
+    if lrclib is not None:
+        if lrclib.synced or lrclib.instrumental:
+            return lrclib
+        best = lrclib  # plain-only — попробуем добыть synced у резерва
+
+    if use_netease:
+        netease, err = await _fetch_netease(session, track, artist, duration_sec, timeout)
+        network_err |= err
+        if netease is not None:
+            if netease.synced:
+                return netease
+            best = best or netease
+
+    if best is not None:
+        return best
+    if network_err:
         return None  # caller сможет ретраить позже
-    _LOGGER.debug("lrclib not_found %r — %r", track, artist)
     return Lyrics(None, None, False, "lrclib", None)
 
 

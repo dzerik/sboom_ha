@@ -76,6 +76,7 @@
           "keepalive_interval": "WebSocket keepalive interval, seconds",
           "availability_threshold": "Disconnect threshold (failed reconnects)",
           "lyrics_enabled": "Fetch synced lyrics from Lrclib.net",
+          "lyrics_netease_fallback": "Use NetEase as a fallback lyrics source",
           "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)"
         }
       }

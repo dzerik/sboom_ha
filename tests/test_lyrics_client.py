@@ -297,3 +297,155 @@ async def test_fetch_lyrics_instrumental_marked_correctly(lrclib_instrumental_re
     assert result.instrumental is True
     assert result.plain is None
     assert result.timeline is None
+
+
+# ─────────────── цепочка провайдеров: LRCLIB → NetEase ───────────────
+#
+# Регрессии, которые ловят эти тесты: (а) fallback вообще не вызывается;
+# (б) сетевой сбой LRCLIB прячет найденный NetEase-результат; (в) NetEase
+# игнорирует матчинг по длительности и берёт не тот трек; (г) выключенная
+# опция всё равно ходит в NetEase.
+
+def _routed_session(routes):
+    """session.get, маршрутизирующий по подстроке URL → (status, json)."""
+    calls: list[str] = []
+
+    def mk(url, **kwargs):
+        calls.append(url)
+        for needle, (status, payload) in routes.items():
+            if needle in url:
+                resp = MagicMock()
+                resp.status = status
+                resp.json = AsyncMock(return_value=payload)
+                ctx = MagicMock()
+                ctx.__aenter__ = AsyncMock(return_value=resp)
+                ctx.__aexit__ = AsyncMock(return_value=False)
+                return ctx
+        raise AssertionError(f"незамоканный URL: {url}")
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=mk)
+    return session, calls
+
+
+_NETEASE_SEARCH_OK = {
+    "result": {"songs": [
+        {"id": 777, "name": "Track", "duration": 200_000,
+         "artists": [{"name": "Artist"}]},
+    ]}
+}
+_NETEASE_LYRIC_OK = {"lrc": {"lyric": "[00:10.00]netease line one\n[00:20.00]netease line two"}}
+
+
+@pytest.mark.asyncio
+async def test_chain_falls_back_to_netease_when_lrclib_not_found():
+    """LRCLIB 404 → текст добывается из NetEase (search + lyric)."""
+    session, calls = _routed_session({
+        "lrclib.net": (404, None),
+        "music.163.com/api/search": (200, _NETEASE_SEARCH_OK),
+        "music.163.com/api/song/lyric": (200, _NETEASE_LYRIC_OK),
+    })
+    result = await fetch_lyrics(session, "Track", "Artist", duration_sec=200)
+    assert isinstance(result, Lyrics)
+    assert result.source == "netease"
+    assert result.timeline == [(10.0, "netease line one"), (20.0, "netease line two")]
+    assert any("music.163.com" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_chain_returns_netease_even_if_lrclib_network_error():
+    """Сетевой сбой LRCLIB не должен прятать найденный NetEase-результат."""
+    def mk(url, **kwargs):
+        if "lrclib.net" in url:
+            raise aiohttp.ClientError("lrclib down")
+        routes = {
+            "music.163.com/api/search": (200, _NETEASE_SEARCH_OK),
+            "music.163.com/api/song/lyric": (200, _NETEASE_LYRIC_OK),
+        }
+        for needle, (status, payload) in routes.items():
+            if needle in url:
+                resp = MagicMock()
+                resp.status = status
+                resp.json = AsyncMock(return_value=payload)
+                ctx = MagicMock()
+                ctx.__aenter__ = AsyncMock(return_value=resp)
+                ctx.__aexit__ = AsyncMock(return_value=False)
+                return ctx
+        raise AssertionError(url)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=mk)
+    result = await fetch_lyrics(session, "Track", "Artist", retries=0)
+    assert result is not None and result.source == "netease"
+
+
+@pytest.mark.asyncio
+async def test_chain_netease_disabled_by_option():
+    """use_netease=False: в NetEase не ходим, LRCLIB-404 → маркер «не найдено»."""
+    session, calls = _routed_session({"lrclib.net": (404, None)})
+    result = await fetch_lyrics(session, "Track", "Artist", use_netease=False)
+    assert isinstance(result, Lyrics) and result.plain is None and result.synced is None
+    assert not any("music.163.com" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_netease_rejects_song_with_wrong_duration():
+    """Матчинг: трек с длительностью вне допуска (±7 c) пропускается —
+    иначе на караоке ляжет текст чужой версии (remix/live)."""
+    search = {"result": {"songs": [
+        {"id": 1, "name": "Track", "duration": 260_000,  # +60 c — мимо
+         "artists": [{"name": "Artist"}]},
+        {"id": 2, "name": "Track", "duration": 201_000,  # в допуске
+         "artists": [{"name": "Artist"}]},
+    ]}}
+    lyric_calls: list[str] = []
+
+    def mk(url, params=None, **kwargs):
+        if "lrclib.net" in url:
+            status, payload = 404, None
+        elif "api/search" in url:
+            status, payload = 200, search
+        elif "api/song/lyric" in url:
+            lyric_calls.append(str((params or {}).get("id")))
+            status, payload = 200, _NETEASE_LYRIC_OK
+        else:
+            raise AssertionError(url)
+        resp = MagicMock()
+        resp.status = status
+        resp.json = AsyncMock(return_value=payload)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=resp)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=mk)
+    result = await fetch_lyrics(session, "Track", "Artist", duration_sec=200)
+    assert result is not None and result.source == "netease"
+    assert lyric_calls == ["2"], "должен быть выбран трек с подходящей длительностью"
+
+
+@pytest.mark.asyncio
+async def test_netease_garbage_json_treated_as_not_found():
+    """Мусорный ответ NetEase не роняет цепочку — итог «не найдено» (маркер)."""
+    session, _ = _routed_session({
+        "lrclib.net": (404, None),
+        "music.163.com/api/search": (200, {"unexpected": "shape"}),
+    })
+    result = await fetch_lyrics(session, "Track", "Artist")
+    assert isinstance(result, Lyrics) and result.synced is None
+
+
+@pytest.mark.asyncio
+async def test_chain_prefers_netease_synced_over_lrclib_plain():
+    """LRCLIB нашёл только plain → NetEase с synced выигрывает (нужен караоке)."""
+    session, _ = _routed_session({
+        "lrclib.net": (200, {"plainLyrics": "plain only", "syncedLyrics": None,
+                             "instrumental": False}),
+        "music.163.com/api/search": (200, _NETEASE_SEARCH_OK),
+        "music.163.com/api/song/lyric": (200, _NETEASE_LYRIC_OK),
+    })
+    result = await fetch_lyrics(session, "Track", "Artist", duration_sec=200)
+    assert result is not None
+    assert result.source == "netease"
+    assert result.timeline is not None

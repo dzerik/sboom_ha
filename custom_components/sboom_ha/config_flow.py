@@ -41,6 +41,7 @@ from .const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
+    DEFAULT_LYRICS_NETEASE,
     DEFAULT_LYRICS_OFFSET,
     DEFAULT_NAME,
     DEFAULT_PORT,
@@ -53,6 +54,7 @@ from .const import (
     OPT_AVAILABILITY_THRESHOLD,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
+    OPT_LYRICS_NETEASE,
     OPT_LYRICS_OFFSET,
     OPT_VOLUME_POLL_INTERVAL,
     PAIR_BUTTON_TIMEOUT_SEC,
@@ -126,6 +128,10 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         OPT_LYRICS_ENABLED,
                         default=opts.get(OPT_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED),
+                    ): bool,
+                    vol.Optional(
+                        OPT_LYRICS_NETEASE,
+                        default=opts.get(OPT_LYRICS_NETEASE, DEFAULT_LYRICS_NETEASE),
                     ): bool,
                     vol.Optional(
                         OPT_LYRICS_OFFSET,

@@ -211,6 +211,7 @@ action:
 | `keepalive_interval` | 25 s | WebSocket KeepAlive интервал |
 | `availability_threshold` | 3 | После скольки подряд неудачных reconnect entity становятся `Unavailable` |
 | `lyrics_enabled` | true | Загружать synced lyrics с Lrclib.net |
+| `lyrics_netease_fallback` | true | Резервный источник текстов NetEase, когда Lrclib не нашёл synced-текст |
 | `lyrics_offset` | 0.0 s | Сдвиг синхронизации текста (+ раньше / − позже), на media_position не влияет |
 
 Изменения применяются мгновенно (auto-reload).
@@ -258,11 +259,11 @@ Brand-ассеты лежат прямо внутри интеграции: `cus
 - `websockets >= 13.0` — WebSocket-клиент
 - `Pillow >= 10.0` — рендер lyrics-кадров для camera entity (≈10 MB)
 
-Lyrics fetched из [Lrclib.net](https://lrclib.net/) — public open API, без авторизации, без ключей.
+Lyrics загружаются цепочкой источников: [Lrclib.net](https://lrclib.net/) → NetEase Cloud Music (резерв, отключается в Options) — оба public API, без авторизации и ключей. Приоритет у synced-текста: plain-only результат Lrclib уступает synced-тексту NetEase.
 
 ## Известные ограничения
 
-- **Lyrics доступны не для всех треков** — Lrclib.net не покрывает 100% каталога. Для редких/новых треков sensor будет `not_found`.
+- **Lyrics доступны не для всех треков** — даже цепочка Lrclib → NetEase не покрывает 100% каталога. Для редких/новых треков sensor будет `not_found`.
 - **Громкость / mute, изменённые физическими кнопками или голосом**, доезжают до HA с задержкой до `volume_poll_interval` (15 с по умолчанию). Команды из HA отражаются мгновенно (optimistic). Пушит ли колонка изменения громкости — вопрос открытый (research-доки противоречат друг другу); включите DEBUG-лог и поищите `state-push получен: volume=` — если появляется, откройте issue, поллинг можно будет ослабить.
 - **Автоматического reauth нет** — протокол не отдаёт различимого признака «токен отвергнут» (см. раздел про переавторизацию).
 
@@ -381,7 +382,7 @@ custom_components/sboom_ha/
 ├── quality_scale.yaml     — HA Quality Scale: Bronze (done/todo/exempt)
 │
 │   # Lyrics и рендер
-├── lyrics_client.py       — Lrclib.net API client с retry
+├── lyrics_client.py       — цепочка lyrics-источников (Lrclib → NetEase) с retry
 ├── image_render.py        — PIL-рендер lyrics-кадров + idle-обложки
 │
 │   # Ассеты
