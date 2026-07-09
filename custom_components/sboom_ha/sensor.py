@@ -164,6 +164,32 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
             else None
         ),
     ),
+    # Сырые Wi-Fi-координаты колонки. В отличие от device_tracker (state =
+    # имя зоны, «Дома»/«Не дома»), здесь state = "lat, lon", а lat/lon/
+    # accuracy/source — в атрибутах для карточек и шаблонов. Diagnostic,
+    # выключен по умолчанию (координаты — чувствительные данные).
+    SboomSensorSpec(
+        key="coordinates",
+        translation_key="coordinates",
+        icon="mdi:map-marker",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: (
+            f"{dev.latitude}, {dev.longitude}"
+            if (dev := _dev(c)) and dev.latitude is not None and dev.longitude is not None
+            else None
+        ),
+        attrs_fn=lambda c: (
+            {
+                "latitude": dev.latitude,
+                "longitude": dev.longitude,
+                "gps_accuracy": dev.location_accuracy,
+                "source": dev.location_source,
+            }
+            if (dev := _dev(c)) and dev.latitude is not None
+            else None
+        ),
+    ),
 )
 
 

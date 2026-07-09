@@ -249,3 +249,24 @@ def test_parse_device_state_location_partial_ignored():
     assert d.latitude is None and d.longitude is None
     assert d.location_source == "wifi"  # source читается независимо
     assert parse_device_state({}).latitude is None
+
+
+def test_coordinates_sensor_value_format():
+    """Диагностический сенсор координат: state='lat, lon', детали в атрибутах
+    (в отличие от device_tracker, где state = имя зоны)."""
+    from sboom_ha._models import DeviceState
+    from sboom_ha.sensor import SENSOR_SPECS
+
+    from tests._fakes import build_coordinator, make_state
+    spec = next(s for s in SENSOR_SPECS if s.key == "coordinates")
+    state = make_state()
+    state.device = DeviceState(latitude=55.66, longitude=37.47,
+                               location_accuracy=8, location_source="wifi")
+    coord = build_coordinator(state=state)
+    assert spec.value_fn(coord) == "55.66, 37.47"
+    attrs = spec.attrs_fn(coord)
+    assert attrs["latitude"] == 55.66 and attrs["gps_accuracy"] == 8
+    # Нет координат → None (сенсор пустой, не строка "None, None")
+    state.device = DeviceState()
+    assert spec.value_fn(coord) is None
+    assert spec.attrs_fn(coord) is None

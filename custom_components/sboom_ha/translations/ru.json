@@ -187,6 +187,9 @@
       },
       "clock_skew": {
         "name": "Рассинхрон часов с Home Assistant"
+      },
+      "coordinates": {
+        "name": "Координаты"
       }
     },
     "binary_sensor": {
@@ -278,6 +281,23 @@
           "description": "Действие над устройством."
         }
       }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "track_changed": "Сменился трек",
+      "playback_changed": "Изменилось воспроизведение",
+      "volume_changed": "Изменилась громкость",
+      "connection_changed": "Изменилась связь"
+    },
+    "action_type": {
+      "play": "Воспроизвести",
+      "pause": "Пауза",
+      "next": "Следующий трек",
+      "previous": "Предыдущий трек",
+      "refresh_metadata": "Обновить метаданные",
+      "find_remote": "Найти пульт",
+      "bt_pairing": "Bluetooth-сопряжение"
     }
   }
 }

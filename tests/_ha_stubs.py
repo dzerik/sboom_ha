@@ -88,6 +88,9 @@ class _FakeDeviceRegistry:
     def async_get(self, device_id: str):
         return self._devices.get(device_id)
 
+    def register(self, device) -> None:
+        self._devices[device.id] = device
+
 
 _DR_INSTANCE: _FakeDeviceRegistry | None = None
 
@@ -473,9 +476,10 @@ class DeviceInfo:
 
 @dataclass
 class DeviceEntry:
-    """Stub для diagnostics device-level."""
+    """Stub для diagnostics device-level + device automation."""
     id: str = "test-device-entry-id"
     identifiers: set = field(default_factory=set)
+    config_entries: set = field(default_factory=set)
 
 
 # ── helpers.issue_registry ──────────────────────────────────────────────
@@ -815,12 +819,19 @@ def install_stubs() -> None:
         Platform=Platform,
         EntityCategory=EntityCategory,
         CONTENT_TYPE_MULTIPART=CONTENT_TYPE_MULTIPART,
+        CONF_DEVICE_ID="device_id",
+        CONF_DOMAIN="domain",
+        CONF_PLATFORM="platform",
+        CONF_TYPE="type",
+        PERCENTAGE="%",
     )
     _make_module(
         "homeassistant.core",
         HomeAssistant=HomeAssistant,
         callback=callback,
         ServiceCall=ServiceCall,
+        Context=object,
+        CALLBACK_TYPE=object,
     )
     _make_module(
         "homeassistant.exceptions",
@@ -828,6 +839,9 @@ def install_stubs() -> None:
         ConfigEntryNotReady=ConfigEntryNotReady,
         ConfigEntryAuthFailed=ConfigEntryAuthFailed,
         ServiceValidationError=ServiceValidationError,
+        InvalidDeviceAutomationConfig=type(
+            "InvalidDeviceAutomationConfig", (HomeAssistantError,), {}
+        ),
     )
     _make_module(
         "homeassistant.config_entries",
@@ -895,6 +909,42 @@ def install_stubs() -> None:
         "homeassistant.components.device_tracker",
         TrackerEntity=TrackerEntity,
         SourceType=_SourceType,
+    )
+    # ── device automation (trigger/action) ──
+    import voluptuous as _vol
+
+    _dev_autom_base = _vol.Schema(
+        {
+            _vol.Required("platform"): str,
+            _vol.Required("domain"): str,
+            _vol.Required("device_id"): str,
+        },
+        extra=_vol.ALLOW_EXTRA,
+    )
+    _make_module(
+        "homeassistant.components.device_automation",
+        DEVICE_TRIGGER_BASE_SCHEMA=_dev_autom_base,
+        DEVICE_ACTION_BASE_SCHEMA=_dev_autom_base,
+    )
+
+    async def _fake_attach_trigger(hass, config, action, info, platform_type=None):
+        return lambda: None
+
+    _make_module("homeassistant.components.homeassistant")
+    _make_module("homeassistant.components.homeassistant.triggers")
+    _make_module(
+        "homeassistant.components.homeassistant.triggers.event",
+        TRIGGER_SCHEMA=lambda cfg: cfg,
+        async_attach_trigger=_fake_attach_trigger,
+        CONF_PLATFORM="platform",
+        CONF_EVENT_TYPE="event_type",
+        CONF_EVENT_DATA="event_data",
+    )
+    _make_module("homeassistant.helpers.typing", ConfigType=dict)
+    _make_module(
+        "homeassistant.helpers.trigger",
+        TriggerActionType=object,
+        TriggerInfo=object,
     )
     _make_module("homeassistant.components.sensor", SensorEntity=SensorEntity)
     _make_module("homeassistant.components.button", ButtonEntity=ButtonEntity)

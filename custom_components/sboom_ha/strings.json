@@ -187,6 +187,9 @@
       },
       "clock_skew": {
         "name": "Clock skew vs Home Assistant"
+      },
+      "coordinates": {
+        "name": "Coordinates"
       }
     },
     "binary_sensor": {
@@ -278,6 +281,23 @@
           "description": "Action to perform."
         }
       }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "track_changed": "Track changed",
+      "playback_changed": "Playback state changed",
+      "volume_changed": "Volume changed",
+      "connection_changed": "Connection changed"
+    },
+    "action_type": {
+      "play": "Play",
+      "pause": "Pause",
+      "next": "Next track",
+      "previous": "Previous track",
+      "refresh_metadata": "Refresh metadata",
+      "find_remote": "Find remote",
+      "bt_pairing": "Bluetooth pairing"
     }
   }
 }
