@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.18.1]
+
+### Changed
+- Актуализирована документация под накопленные 0.14–0.18: README (диаграмма архитектуры с binary_sensor/device_tracker/lyrics_manager, цепочка Lrclib→NetEase, раздел про автоматизации) и карточка HACS `info.md` (караоке-подсветка, скорость, BT, device tracker, device-триггеры/действия, диагностические сенсоры, авто-восстановление IP).
+
 ## [0.18.0]
 
 ### Added
