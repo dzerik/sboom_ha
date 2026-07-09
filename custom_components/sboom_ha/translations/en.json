@@ -175,6 +175,18 @@
       },
       "paired_bt": {
         "name": "Paired Bluetooth devices"
+      },
+      "ip_address": {
+        "name": "IP address"
+      },
+      "timezone": {
+        "name": "Time zone"
+      },
+      "age_mode": {
+        "name": "Age mode"
+      },
+      "clock_skew": {
+        "name": "Clock skew vs Home Assistant"
       }
     },
     "binary_sensor": {
@@ -195,6 +207,18 @@
       },
       "morning_show": {
         "name": "Morning show"
+      },
+      "alarm_ringing": {
+        "name": "Alarm ringing"
+      },
+      "track_has_lyrics": {
+        "name": "Track has lyrics"
+      },
+      "assistant_auto_volume": {
+        "name": "Assistant auto volume"
+      },
+      "proactivity_notification": {
+        "name": "Assistant proactive notification"
       }
     },
     "camera": {

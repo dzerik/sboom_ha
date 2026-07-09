@@ -175,6 +175,18 @@
       },
       "paired_bt": {
         "name": "Спаренные Bluetooth-устройства"
+      },
+      "ip_address": {
+        "name": "IP-адрес"
+      },
+      "timezone": {
+        "name": "Часовой пояс"
+      },
+      "age_mode": {
+        "name": "Возрастной режим"
+      },
+      "clock_skew": {
+        "name": "Рассинхрон часов с Home Assistant"
       }
     },
     "binary_sensor": {
@@ -195,6 +207,18 @@
       },
       "morning_show": {
         "name": "Утреннее шоу"
+      },
+      "alarm_ringing": {
+        "name": "Будильник звонит"
+      },
+      "track_has_lyrics": {
+        "name": "У трека есть текст"
+      },
+      "assistant_auto_volume": {
+        "name": "Автогромкость ассистента"
+      },
+      "proactivity_notification": {
+        "name": "Проактивное уведомление ассистента"
       }
     },
     "camera": {

@@ -23,6 +23,7 @@ class TrackInfo:
     repeat: str | None = None
     explicit: bool = False
     liked: bool = False
+    has_lyrics: bool | None = None  # info.hasLyrics — есть ли у трека текст на стороне Sber
     playback_speed: float | None = None  # playbackSpeedRate из метаданных (0.5–2.0)
     # Момент получения данных на стороне HA. monotonic — для экстраполяции
     # позиции (часы колонки могут расходиться с часами HA, см. helpers.py),
@@ -49,8 +50,15 @@ class DeviceState:
     assistant_character: str | None = None  # assistant.character
     is_subscription_device: bool | None = None  # subscrDeviceInfo.isSubscrDevice
     network_type: str | None = None         # network.connection_type
+    network_ip: str | None = None           # network.ip
     home_security: bool | None = None       # homeSecurity.enabled
     in_morning_show: bool | None = None     # morning_show.in_show
+    alarm_ringing: bool | None = None       # alarm.playing (null когда тихо, truthy при звонке)
+    assistant_auto_volume: bool | None = None  # assistant.auto_volume
+    proactivity_notification: bool | None = None  # proactivityNotification.hasNotification
+    timezone_id: str | None = None          # time.timezone_id (напр. "Europe/Moscow")
+    device_unixtime: float | None = None    # timesync.unixtime — часы колонки (для диагностики skew)
+    age_mode: str | None = None             # user_settings.age_mode (adult/child)
 
 
 @dataclass

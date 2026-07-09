@@ -89,6 +89,40 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda c: dev.in_morning_show if (dev := _dev(c)) else None,
     ),
+    # Будильник/таймер звонит прямо сейчас — идеальный триггер для сценариев
+    # пробуждения (alarm.playing из GET_STATE).
+    SboomBinarySensorSpec(
+        key="alarm_ringing",
+        translation_key="alarm_ringing",
+        device_class=BinarySensorDeviceClass.SOUND,
+        icon="mdi:alarm-bell",
+        is_on_fn=lambda c: dev.alarm_ringing if (dev := _dev(c)) else None,
+    ),
+    # У текущего трека есть текст на стороне Sber (info.hasLyrics). Источник —
+    # track, а не device_state.
+    SboomBinarySensorSpec(
+        key="track_has_lyrics",
+        translation_key="track_has_lyrics",
+        icon="mdi:script-text-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=lambda c: c.track.has_lyrics if c.track else None,
+    ),
+    # Автогромкость голосового ассистента включена (assistant.auto_volume).
+    SboomBinarySensorSpec(
+        key="assistant_auto_volume",
+        translation_key="assistant_auto_volume",
+        icon="mdi:volume-vibrate",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=lambda c: dev.assistant_auto_volume if (dev := _dev(c)) else None,
+    ),
+    # Ассистент хочет проактивно что-то сообщить (proactivityNotification).
+    SboomBinarySensorSpec(
+        key="proactivity_notification",
+        translation_key="proactivity_notification",
+        icon="mdi:message-badge",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=lambda c: dev.proactivity_notification if (dev := _dev(c)) else None,
+    ),
 )
 
 

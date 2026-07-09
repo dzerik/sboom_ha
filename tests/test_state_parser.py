@@ -145,3 +145,87 @@ def test_parse_state_volume_still_works_minimal_payload():
     state = parse_state(b'{"volume":{"muted":false,"percent":42}}')
     assert state.volume_percent == 42
     assert state.muted is False
+
+
+# ─────────── новые подсистемы GET_STATE (0.16.0, схемы из реальных захватов) ───────────
+#
+# Схемы взяты из research/events.jsonl (декодированный op=12):
+# location, assistant.auto_volume, proactivityNotification, network.ip,
+# time.timezone_id, timesync.unixtime, user_settings.age_mode, alarm.playing.
+
+
+def test_parse_device_state_assistant_auto_volume():
+    """assistant.auto_volume → отдельный флаг, character по-прежнему читается."""
+    d = parse_device_state({"assistant": {"auto_volume": True, "character": "afina"}})
+    assert d.assistant_auto_volume is True
+    assert d.assistant_character == "afina"
+    # Без поля — None (не False), чтобы не путать «выключено» с «нет данных».
+    assert parse_device_state({"assistant": {"character": "joy"}}).assistant_auto_volume is None
+
+
+def test_parse_device_state_proactivity_notification():
+    assert parse_device_state(
+        {"proactivityNotification": {"hasNotification": True}}
+    ).proactivity_notification is True
+    assert parse_device_state(
+        {"proactivityNotification": {"hasNotification": False}}
+    ).proactivity_notification is False
+    assert parse_device_state({}).proactivity_notification is None
+
+
+def test_parse_device_state_alarm_ringing_bool_coercion():
+    """alarm.playing: null → False (поле есть), truthy → True. Форма truthy
+    неизвестна из захватов, поэтому bool() покрывает любой вариант."""
+    assert parse_device_state({"alarm": {"playing": None}}).alarm_ringing is False
+    assert parse_device_state({"alarm": {"playing": "session-42"}}).alarm_ringing is True
+    assert parse_device_state({"alarm": {"playing": 1}}).alarm_ringing is True
+    # Поля playing нет вовсе → None (не False).
+    assert parse_device_state({"alarm": {"alarms": []}}).alarm_ringing is None
+
+
+def test_parse_device_state_network_ip():
+    d = parse_device_state({"network": {"connection_type": "WIFI", "ip": "95.165.105.44"}})
+    assert d.network_type == "WIFI"
+    assert d.network_ip == "95.165.105.44"
+
+
+def test_parse_device_state_time_and_timesync():
+    d = parse_device_state({
+        "time": {"timezone_id": "Europe/Moscow", "timezone_offset_sec": 10800},
+        "timesync": {"unixtime": 1778182355.536},
+    })
+    assert d.timezone_id == "Europe/Moscow"
+    assert d.device_unixtime == 1778182355.536
+
+
+def test_parse_device_state_age_mode():
+    assert parse_device_state(
+        {"user_settings": {"age_mode": "adult"}}
+    ).age_mode == "adult"
+
+
+def test_parse_device_state_full_real_capture():
+    """Полный реальный GET_STATE (сокращённый до целевых подсистем) —
+    все новые поля извлекаются вместе, ничего не ломает существующие."""
+    real = {
+        "location": {"accuracy": 8.0, "lat": 55.660927, "lon": 37.469685,
+                     "source": "wifi", "timestamp": 1777494329616},
+        "assistant": {"auto_volume": False, "character": "afina"},
+        "proactivityNotification": {"hasNotification": False},
+        "timesync": {"unixtime": 1778182355.536},
+        "time": {"timezone_id": "Europe/Moscow"},
+        "network": {"connection_type": "WIFI", "ip": "95.165.105.44"},
+        "user_settings": {"age_mode": "adult"},
+        "alarm": {"alarms": [], "alarmsCounter": 0, "playing": None, "timers": []},
+        "capabilities_state": {"led_display": {"brightness": 100, "turned_on": True}},
+    }
+    d = parse_device_state(real)
+    assert d.assistant_auto_volume is False
+    assert d.assistant_character == "afina"
+    assert d.proactivity_notification is False
+    assert d.device_unixtime == 1778182355.536
+    assert d.timezone_id == "Europe/Moscow"
+    assert d.network_ip == "95.165.105.44"
+    assert d.age_mode == "adult"
+    assert d.alarm_ringing is False
+    assert d.led_brightness == 100  # регрессия: старые поля не пострадали

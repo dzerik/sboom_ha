@@ -263,3 +263,19 @@ def test_parse_scanned_bt_with_devices():
     assert devices[0].mac == "11:22:33:44:55:66"
     assert devices[0].name == "Speaker"
     assert devices[0].rssi == 200
+
+
+def test_parse_track_extracts_has_lyrics():
+    """info.hasLyrics → track.has_lyrics (схема из реального metadata-захвата)."""
+    raw = b'{"trackId":"42","title":"X","artists":[],"hasLyrics":true}'
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None and track.has_lyrics is True
+
+    raw2 = b'{"trackId":"42","title":"X","artists":[],"hasLyrics":false}'
+    assert SberSpeakerClient.parse_track(raw2).has_lyrics is False
+
+
+def test_parse_track_has_lyrics_none_when_absent():
+    """Нет hasLyrics — поле остаётся None (не False): 'неизвестно' ≠ 'нет текста'."""
+    raw = b'{"trackId":"42","title":"X","artists":[]}'
+    assert SberSpeakerClient.parse_track(raw).has_lyrics is None

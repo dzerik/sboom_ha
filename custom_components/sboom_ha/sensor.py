@@ -1,6 +1,7 @@
 """Сенсоры sboom_ha: lyrics + декларативные read-only сенсоры подсистем GET_STATE."""
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -117,6 +118,51 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
                 for d in c.paired_bt
             ]
         },
+    ),
+    # IP-адрес колонки в локальной сети (network.ip). Diagnostic.
+    SboomSensorSpec(
+        key="ip_address",
+        translation_key="ip_address",
+        icon="mdi:ip-network",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: dev.network_ip if (dev := _dev(c)) else None,
+    ),
+    # Часовой пояс колонки (time.timezone_id). Diagnostic.
+    SboomSensorSpec(
+        key="timezone",
+        translation_key="timezone",
+        icon="mdi:map-clock",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: dev.timezone_id if (dev := _dev(c)) else None,
+    ),
+    # Возрастной режим профиля (user_settings.age_mode: adult/child). Diagnostic.
+    SboomSensorSpec(
+        key="age_mode",
+        translation_key="age_mode",
+        icon="mdi:account-child",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: dev.age_mode if (dev := _dev(c)) else None,
+    ),
+    # Рассинхрон часов колонки и HA (сек): device_unixtime − now. Помогает
+    # диагностировать сдвиг караоке/позиции. Значение включает возраст poll'а
+    # (до volume_poll_interval), поэтому это грубый индикатор минутного skew,
+    # а не точный тайминг. Diagnostic, выключен по умолчанию.
+    SboomSensorSpec(
+        key="clock_skew",
+        translation_key="clock_skew",
+        icon="mdi:clock-alert-outline",
+        native_unit="s",
+        state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: (
+            round(dev.device_unixtime - time.time())
+            if (dev := _dev(c)) and dev.device_unixtime is not None
+            else None
+        ),
     ),
 )
 

@@ -61,6 +61,11 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
         ds.alarms_count = counter if counter is not None else len(ds.alarms)
         ds.timers = alarm.get("timers") or []
         ds.timers_count = len(ds.timers)
+        # alarm.playing: null когда тихо, truthy в момент звонка. Точная форма
+        # truthy-значения не подтверждена захватом (все сэмплы — null), поэтому
+        # трактуем через bool() — покрывает любой из вариантов.
+        if "playing" in alarm:
+            ds.alarm_ringing = bool(alarm.get("playing"))
 
     sleep = data.get("deviceSleep")
     if isinstance(sleep, dict):
@@ -87,6 +92,12 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     assistant = data.get("assistant")
     if isinstance(assistant, dict):
         ds.assistant_character = assistant.get("character")
+        if "auto_volume" in assistant:
+            ds.assistant_auto_volume = bool(assistant.get("auto_volume"))
+
+    proactivity = data.get("proactivityNotification")
+    if isinstance(proactivity, dict) and "hasNotification" in proactivity:
+        ds.proactivity_notification = bool(proactivity.get("hasNotification"))
 
     subscr = data.get("subscrDeviceInfo")
     if isinstance(subscr, dict):
@@ -95,6 +106,7 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     network = data.get("network")
     if isinstance(network, dict):
         ds.network_type = network.get("connection_type")
+        ds.network_ip = network.get("ip")
 
     security = data.get("homeSecurity")
     if isinstance(security, dict):
@@ -103,6 +115,20 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     show = data.get("morning_show")
     if isinstance(show, dict):
         ds.in_morning_show = show.get("in_show")
+
+    tm = data.get("time")
+    if isinstance(tm, dict):
+        ds.timezone_id = tm.get("timezone_id")
+
+    ts = data.get("timesync")
+    if isinstance(ts, dict):
+        unixtime = ts.get("unixtime")
+        if isinstance(unixtime, (int, float)):
+            ds.device_unixtime = float(unixtime)
+
+    settings = data.get("user_settings")
+    if isinstance(settings, dict):
+        ds.age_mode = settings.get("age_mode")
 
     return ds
 
@@ -312,6 +338,8 @@ def parse_track(raw: bytes) -> TrackInfo | None:
     ti.provider = data.get("provider") or outer.get("provider")
     ti.explicit = bool(data.get("explicit", False))
     ti.liked = bool(data.get("like", False))
+    if "hasLyrics" in data:
+        ti.has_lyrics = bool(data.get("hasLyrics"))
 
     dur = data.get("duration") or outer.get("duration") or 0
     ti.duration_sec = int(dur) if dur else None
