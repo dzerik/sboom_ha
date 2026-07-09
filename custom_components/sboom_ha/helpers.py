@@ -1,7 +1,8 @@
 """Общие утилиты для media_player, sensor, camera."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .const import COVER_SIZE, ZVUK_IMAGE_CDN
@@ -11,28 +12,53 @@ if TYPE_CHECKING:
     from .coordinator import SboomCoordinator
 
 
-# Защита от мусорных значений position_ts_ms (например при reboot колонки).
+# Защита от мусорных значений timestamp (например при reboot колонки).
 _MAX_EXTRAPOLATION_SEC = 600
 
 
 def track_position(coordinator: SboomCoordinator) -> float | None:
-    """Текущая позиция трека в секундах с экстраполяцией от position_ts_ms.
+    """Текущая позиция трека в секундах с экстраполяцией.
 
-    Колонка отдаёт позицию + timestamp последнего обновления. Между push'ами
-    позицию экстраполируем по wall-clock; ограничиваем диапазон чтобы не
-    "уехать" при долгом отсутствии push'ей или после reboot колонки.
+    База экстраполяции — received_monotonic (момент получения данных на
+    стороне HA): часы колонки могут расходиться с часами HA, и завязка на
+    position_ts_ms устройства сдвигала бы позицию (и караоке-лирику) на
+    величину skew, а при часах колонки «в будущем» вовсе отключала
+    экстраполяцию. Fallback на position_ts_ms — только для треков без
+    отметки (старые записи в тестах/кэше).
     """
     track = coordinator.track
     if not track or track.position_sec is None:
         return None
     pos = float(track.position_sec)
-    if track.playing and track.position_ts_ms:
-        delta = (datetime.now(timezone.utc).timestamp() * 1000 - track.position_ts_ms) / 1000.0
-        if 0 <= delta < _MAX_EXTRAPOLATION_SEC:
-            pos += delta
+    if track.playing:
+        delta: float | None = None
+        if track.received_monotonic is not None:
+            delta = time.monotonic() - track.received_monotonic
+        elif track.position_ts_ms:
+            delta = (
+                datetime.now(UTC).timestamp() * 1000 - track.position_ts_ms
+            ) / 1000.0
+        if delta is not None and 0 <= delta < _MAX_EXTRAPOLATION_SEC:
+            speed = track.playback_speed or 1.0
+            if speed <= 0:
+                speed = 1.0
+            pos += delta * speed
     if track.duration_sec:
         pos = min(pos, float(track.duration_sec))
     return pos
+
+
+def lyrics_position(coordinator: SboomCoordinator) -> float | None:
+    """Позиция для синхронизации лирики: track_position + пользовательский offset.
+
+    Offset (options flow) компенсирует систематическое опережение/отставание
+    текстов конкретной колонки. К media_position НЕ применяется.
+    """
+    pos = track_position(coordinator)
+    if pos is None:
+        return None
+    offset = getattr(coordinator, "lyrics_offset", 0.0) or 0.0
+    return max(0.0, pos + offset)
 
 
 def cover_url(track: TrackInfo) -> str | None:

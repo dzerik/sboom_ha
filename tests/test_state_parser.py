@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from sboom_ha._parsers import parse_device_state, parse_state
 
-
 # ─────────────────────── parse_device_state ───────────────────────
 
 
@@ -146,3 +145,128 @@ def test_parse_state_volume_still_works_minimal_payload():
     state = parse_state(b'{"volume":{"muted":false,"percent":42}}')
     assert state.volume_percent == 42
     assert state.muted is False
+
+
+# ─────────── новые подсистемы GET_STATE (0.16.0, схемы из реальных захватов) ───────────
+#
+# Схемы взяты из research/events.jsonl (декодированный op=12):
+# location, assistant.auto_volume, proactivityNotification, network.ip,
+# time.timezone_id, timesync.unixtime, user_settings.age_mode, alarm.playing.
+
+
+def test_parse_device_state_assistant_auto_volume():
+    """assistant.auto_volume → отдельный флаг, character по-прежнему читается."""
+    d = parse_device_state({"assistant": {"auto_volume": True, "character": "afina"}})
+    assert d.assistant_auto_volume is True
+    assert d.assistant_character == "afina"
+    # Без поля — None (не False), чтобы не путать «выключено» с «нет данных».
+    assert parse_device_state({"assistant": {"character": "joy"}}).assistant_auto_volume is None
+
+
+def test_parse_device_state_proactivity_notification():
+    assert parse_device_state(
+        {"proactivityNotification": {"hasNotification": True}}
+    ).proactivity_notification is True
+    assert parse_device_state(
+        {"proactivityNotification": {"hasNotification": False}}
+    ).proactivity_notification is False
+    assert parse_device_state({}).proactivity_notification is None
+
+
+def test_parse_device_state_alarm_ringing_bool_coercion():
+    """alarm.playing: null → False (поле есть), truthy → True. Форма truthy
+    неизвестна из захватов, поэтому bool() покрывает любой вариант."""
+    assert parse_device_state({"alarm": {"playing": None}}).alarm_ringing is False
+    assert parse_device_state({"alarm": {"playing": "session-42"}}).alarm_ringing is True
+    assert parse_device_state({"alarm": {"playing": 1}}).alarm_ringing is True
+    # Поля playing нет вовсе → None (не False).
+    assert parse_device_state({"alarm": {"alarms": []}}).alarm_ringing is None
+
+
+def test_parse_device_state_network_ip():
+    d = parse_device_state({"network": {"connection_type": "WIFI", "ip": "95.165.105.44"}})
+    assert d.network_type == "WIFI"
+    assert d.network_ip == "95.165.105.44"
+
+
+def test_parse_device_state_time_and_timesync():
+    d = parse_device_state({
+        "time": {"timezone_id": "Europe/Moscow", "timezone_offset_sec": 10800},
+        "timesync": {"unixtime": 1778182355.536},
+    })
+    assert d.timezone_id == "Europe/Moscow"
+    assert d.device_unixtime == 1778182355.536
+
+
+def test_parse_device_state_age_mode():
+    assert parse_device_state(
+        {"user_settings": {"age_mode": "adult"}}
+    ).age_mode == "adult"
+
+
+def test_parse_device_state_full_real_capture():
+    """Полный реальный GET_STATE (сокращённый до целевых подсистем) —
+    все новые поля извлекаются вместе, ничего не ломает существующие."""
+    real = {
+        "location": {"accuracy": 8.0, "lat": 55.660927, "lon": 37.469685,
+                     "source": "wifi", "timestamp": 1777494329616},
+        "assistant": {"auto_volume": False, "character": "afina"},
+        "proactivityNotification": {"hasNotification": False},
+        "timesync": {"unixtime": 1778182355.536},
+        "time": {"timezone_id": "Europe/Moscow"},
+        "network": {"connection_type": "WIFI", "ip": "95.165.105.44"},
+        "user_settings": {"age_mode": "adult"},
+        "alarm": {"alarms": [], "alarmsCounter": 0, "playing": None, "timers": []},
+        "capabilities_state": {"led_display": {"brightness": 100, "turned_on": True}},
+    }
+    d = parse_device_state(real)
+    assert d.assistant_auto_volume is False
+    assert d.assistant_character == "afina"
+    assert d.proactivity_notification is False
+    assert d.device_unixtime == 1778182355.536
+    assert d.timezone_id == "Europe/Moscow"
+    assert d.network_ip == "95.165.105.44"
+    assert d.age_mode == "adult"
+    assert d.alarm_ringing is False
+    assert d.led_brightness == 100  # регрессия: старые поля не пострадали
+
+
+def test_parse_device_state_location():
+    """location {lat,lon,accuracy,source} → координаты (схема из реального захвата)."""
+    d = parse_device_state({
+        "location": {"accuracy": 8.0, "lat": 55.660927, "lon": 37.469685,
+                     "source": "wifi", "timestamp": 1777494329616}
+    })
+    assert d.latitude == 55.660927
+    assert d.longitude == 37.469685
+    assert d.location_accuracy == 8  # округлён до int (метры)
+    assert d.location_source == "wifi"
+
+
+def test_parse_device_state_location_partial_ignored():
+    """Битая/неполная координата не даёт полу-заполненного положения."""
+    d = parse_device_state({"location": {"lat": 55.6, "source": "wifi"}})  # без lon
+    assert d.latitude is None and d.longitude is None
+    assert d.location_source == "wifi"  # source читается независимо
+    assert parse_device_state({}).latitude is None
+
+
+def test_coordinates_sensor_value_format():
+    """Диагностический сенсор координат: state='lat, lon', детали в атрибутах
+    (в отличие от device_tracker, где state = имя зоны)."""
+    from sboom_ha._models import DeviceState
+    from sboom_ha.sensor import SENSOR_SPECS
+
+    from tests._fakes import build_coordinator, make_state
+    spec = next(s for s in SENSOR_SPECS if s.key == "coordinates")
+    state = make_state()
+    state.device = DeviceState(latitude=55.66, longitude=37.47,
+                               location_accuracy=8, location_source="wifi")
+    coord = build_coordinator(state=state)
+    assert spec.value_fn(coord) == "55.66, 37.47"
+    attrs = spec.attrs_fn(coord)
+    assert attrs["latitude"] == 55.66 and attrs["gps_accuracy"] == 8
+    # Нет координат → None (сенсор пустой, не строка "None, None")
+    state.device = DeviceState()
+    assert spec.value_fn(coord) is None
+    assert spec.attrs_fn(coord) is None

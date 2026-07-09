@@ -1,9 +1,6 @@
 """Тесты Options Flow + чтение опций в coordinator."""
 from __future__ import annotations
 
-from tests._fakes import build_coordinator, make_entry, make_state, make_track
-from tests._ha_stubs import HomeAssistant
-
 from sboom_ha.const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
     DEFAULT_KEEPALIVE_INTERVAL,
@@ -15,6 +12,9 @@ from sboom_ha.const import (
     OPT_VOLUME_POLL_INTERVAL,
 )
 from sboom_ha.coordinator import SboomCoordinator
+
+from tests._fakes import make_entry, make_state, make_track
+from tests._ha_stubs import HomeAssistant
 
 
 def _coord_with_options(**opts):
@@ -71,7 +71,7 @@ def test_maybe_fetch_lyrics_no_op_when_disabled():
     coord.track = make_track(track_id="X")  # валидный трек
     coord._maybe_fetch_lyrics()
     # Если lyrics disabled — track_id НЕ должен попасть в inflight set
-    assert "X" not in coord._lyrics_inflight
+    assert "X" not in coord.lyrics._inflight
 
 
 def test_maybe_fetch_lyrics_runs_when_enabled():
@@ -82,7 +82,7 @@ def test_maybe_fetch_lyrics_runs_when_enabled():
     coord.track = make_track(track_id="Y", title="t", artists=["a"])
     coord._maybe_fetch_lyrics()
     # Background task создан → track_id в inflight
-    assert "Y" in coord._lyrics_inflight
+    assert "Y" in coord.lyrics._inflight
 
 
 # ─────────────────── coexistence with state ───────────────────
