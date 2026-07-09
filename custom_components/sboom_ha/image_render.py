@@ -209,49 +209,31 @@ def _draw_text_karaoke(
     строки закрашиваются последовательно, а не одновременно.
     """
     frac = max(0.0, min(1.0, frac))
-    # Маска текста (L-канал) на той же разметке, что и обычный рендер.
+    # Прямая отрисовка текстом, без полнокадровых масок: белая строка
+    # целиком + «пропетый» префикс акцентным цветом ПОВЕРХ, тем же шрифтом
+    # от того же левого края. Позиции глифов префикса совпадают с полной
+    # строкой пиксель-в-пиксель (кернинг зависит только от пар внутри
+    # префикса), поэтому символы не плывут. Гранулярность — символ:
+    # буква загорается целиком, без разрезанных глифов, как в классическом
+    # караоке. Дешевле маскирования на ~4 полнокадровых буфера на кадр.
     lines, x, _align, y0, font_size = _layout_text(text, box, "mm", font_size, line_width)
     font = _font(font_size)
-    mask = Image.new("L", canvas.size, 0)
-    mctx = ImageDraw.Draw(mask)
-    y = y0
-    for line in lines:
-        mctx.text((x, y), line, anchor="ma", fill=255, font=font)
-        y += font_size
-
-    white = Image.new("RGB", canvas.size, (255, 255, 255))
-    canvas.paste(white, (0, 0), mask)
-
-    if frac <= 0.0:
-        return
-
-    # Построчный sweep: закраска идёт в порядке чтения через переносы.
-    # Единый вертикальный срез по всему боксу красил многострочный текст
-    # на всех строках одновременно — бессмыслица при чтении.
-    sweep = mask.copy()
-    sctx = ImageDraw.Draw(sweep)
+    ctx = ImageDraw.Draw(canvas)
     y = y0
     for line, fill_frac in zip(lines, _karaoke_line_fills(lines, frac), strict=True):
-        if fill_frac >= 1.0:
-            y += font_size
-            continue
-        if fill_frac <= 0.0:
-            cut = 0.0  # строка ещё не поётся — гасим целиком
-        else:
-            # Точный посимвольный срез внутри строки: ширина пропетой части
-            # по метрикам шрифта (центрированный anchor "ma" → левый край
-            # строки = центр − ширина/2).
-            chars = fill_frac * len(line)
-            i = int(chars)
-            w_full = font.getlength(line)
-            w_done = font.getlength(line[:i])
-            w_next = font.getlength(line[: min(i + 1, len(line))])
-            cut = (x - w_full / 2) + w_done + (chars - i) * (w_next - w_done)
-        sctx.rectangle((cut, y, canvas.width, y + font_size), fill=0)
-        y += font_size
+        # Пропетая часть строки — целое число символов (floor: символ
+        # «загорается», когда пропет).
+        sung_chars = int(fill_frac * len(line)) if fill_frac < 1.0 else len(line)
+        sung = line[:sung_chars]
+        unsung = line[sung_chars:]
 
-    accent = Image.new("RGB", canvas.size, KARAOKE_ACCENT)
-    canvas.paste(accent, (0, 0), sweep)
+        if unsung:
+            ctx.text((x, y), line, anchor="ma", fill="white", font=font)
+        if sung:
+            # Левый край центрированной строки: центр − ширина/2.
+            x0 = x - font.getlength(line) / 2
+            ctx.text((x0, y), sung, anchor="la", fill=KARAOKE_ACCENT, font=font)
+        y += font_size
 
 
 def _draw_progress(ctx: ImageDraw.ImageDraw, progress: float | None) -> None:

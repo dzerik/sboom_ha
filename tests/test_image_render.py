@@ -259,3 +259,27 @@ def test_karaoke_multiline_full_progress_paints_both_lines():
     img = Image.open(io.BytesIO(jpeg)).convert("RGB")
     assert _accent_present(img, 155, 235)
     assert _accent_present(img, 245, 330)
+
+
+def _white_present(img, y_from, y_to):
+    region = img.crop((0, y_from, img.width, y_to))
+    return any(r > 230 and g > 230 and b > 230 for r, g, b in region.getdata())
+
+
+def test_karaoke_partial_line_has_both_colors():
+    """Частично пропетая строка содержит И акцентные, И белые символы.
+
+    Ловит регрессию прямой отрисовки: если префикс перекрасит всю строку
+    (или белый слой не нарисуется), одна из проверок упадёт."""
+    import io
+
+    from PIL import Image
+    from sboom_ha.image_render import draw_lyrics_with_cover
+
+    # Одна экранная строка (18 символов < line_width 22), прогресс 0.5
+    text = "ы" * 18
+    jpeg = draw_lyrics_with_cover(None, text, None, None, None, line_progress=0.5)
+    img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    # Одна строка: y0 = 120 + (240-90)//2 = 195; полоса 195..285
+    assert _accent_present(img, 195, 285), "пропетая часть должна быть акцентной"
+    assert _white_present(img, 195, 285), "непропетая часть должна остаться белой"
