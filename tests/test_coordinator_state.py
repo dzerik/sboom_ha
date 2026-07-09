@@ -124,3 +124,75 @@ async def test_successful_poll_resets_failure_counter():
     await coord._refresh_state_and_track(notify=False)
     assert coord._poll_failures == 1
     assert all_closed == [] and closed2 == [], "close не должен вызываться при сброшенной серии"
+
+
+# ─────────── регрессия: «таймлайн сбрасывается на 0 каждые 15 секунд» ───────────
+#
+# Прод-баг 0.14.x: poll-ответ get_metadata несёт позицию на момент ПОСЛЕДНЕГО
+# события (стартовый снапшот трека), а не текущую. _stamp_track ставил свежий
+# received_monotonic на этот stale-снапшот — экстраполяция track_position
+# начиналась заново от старой позиции на каждом poll-цикле.
+
+def _track_snapshot(**kw):
+    from tests._fakes import make_track
+    defaults = dict(position_sec=0, position_ts_ms=1_700_000_000_000, playing=True,
+                    duration_sec=300)
+    defaults.update(kw)
+    return make_track(**defaults)
+
+
+def test_stamp_track_keeps_base_for_same_position_snapshot(monkeypatch):
+    """Тот же снапшот позиции (track_id+tsMs+position_sec) → база экстраполяции
+    сохраняется, и track_position продолжает расти, а не откатывается к 0."""
+    import time as time_mod
+
+    from sboom_ha.helpers import track_position
+
+    coord = build_coordinator(track=None, state=make_state())
+
+    t0 = time_mod.monotonic()
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0)
+    first = coord._stamp_track(_track_snapshot())
+    coord.track = first
+    assert first.received_monotonic == t0
+
+    # Через 15 секунд poll принёс ИДЕНТИЧНЫЙ снапшот (нового события не было)
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0 + 15)
+    polled = coord._stamp_track(_track_snapshot())
+    coord.track = polled
+    assert polled.received_monotonic == t0, "база экстраполяции должна переноситься"
+
+    # Позиция во внешнем мире: ~15 c, а не 0
+    monkeypatch.setattr("sboom_ha.helpers.time.monotonic", lambda: t0 + 15)
+    pos = track_position(coord)
+    assert pos is not None and 14.5 <= pos <= 15.5, f"позиция откатилась: {pos}"
+
+
+def test_stamp_track_restamps_on_new_event(monkeypatch):
+    """Новое событие на колонке (другой tsMs — seek/pause/resume) → свежий штамп."""
+    import time as time_mod
+
+    coord = build_coordinator(track=None, state=make_state())
+    t0 = time_mod.monotonic()
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0)
+    coord.track = coord._stamp_track(_track_snapshot())
+
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0 + 15)
+    seeked = coord._stamp_track(
+        _track_snapshot(position_sec=60, position_ts_ms=1_700_000_015_000)
+    )
+    assert seeked.received_monotonic == t0 + 15, "новый снапшот — новая база"
+
+
+def test_stamp_track_restamps_on_track_change(monkeypatch):
+    """Смена трека → свежий штамп даже при совпадающем position_sec."""
+    import time as time_mod
+
+    coord = build_coordinator(track=None, state=make_state())
+    t0 = time_mod.monotonic()
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0)
+    coord.track = coord._stamp_track(_track_snapshot(track_id="1001"))
+
+    monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0 + 5)
+    next_track = coord._stamp_track(_track_snapshot(track_id="2002"))
+    assert next_track.received_monotonic == t0 + 5

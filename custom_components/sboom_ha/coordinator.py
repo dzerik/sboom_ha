@@ -308,8 +308,28 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         monotonic — база экстраполяции позиции (часы колонки могут расходиться
         с часами HA), unix-время — для media_position_updated_at.
+
+        ВАЖНО: если payload несёт ТОТ ЖЕ снапшот позиции, что уже есть
+        (track_id + position_ts_ms + position_sec не изменились — т.е. на
+        колонке не было нового события), база экстраполяции ПЕРЕНОСИТСЯ со
+        старого трека. Poll-ответ get_metadata возвращает позицию на момент
+        последнего события, а не текущую: свежий штамп на несвежей позиции
+        откатывал бы воспроизведение к stale-значению на каждый poll
+        (наблюдалось как «таймлайн сбрасывается на 0 каждые 15 секунд»).
         """
-        if track is not None:
+        if track is None:
+            return None
+        prev = self.track
+        if (
+            prev is not None
+            and prev.received_monotonic is not None
+            and prev.track_id == track.track_id
+            and prev.position_ts_ms == track.position_ts_ms
+            and prev.position_sec == track.position_sec
+        ):
+            track.received_monotonic = prev.received_monotonic
+            track.received_ts = prev.received_ts
+        else:
             track.received_monotonic = time.monotonic()
             track.received_ts = time.time()
         return track
