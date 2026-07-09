@@ -231,7 +231,7 @@ def _draw_text_karaoke(
     sweep = mask.copy()
     sctx = ImageDraw.Draw(sweep)
     y = y0
-    for line, fill_frac in zip(lines, _karaoke_line_fills(lines, frac)):
+    for line, fill_frac in zip(lines, _karaoke_line_fills(lines, frac), strict=True):
         if fill_frac >= 1.0:
             y += font_size
             continue

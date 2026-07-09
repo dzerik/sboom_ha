@@ -15,6 +15,7 @@ from sboom_ha.image_render import (
     HEIGHT,
     WIDTH,
     _blur_bg_cached,
+    _karaoke_line_fills,
     _make_blur_bg,
     draw_blank,
     draw_cover_yandex,
@@ -190,7 +191,6 @@ def test_resize_jpeg_noop_without_dimensions():
 # чтения: прогресс распределяется по символам, слово получает время
 # пропорционально длине.
 
-from sboom_ha.image_render import _karaoke_line_fills
 
 
 def test_karaoke_fills_sequential_lines():
@@ -234,7 +234,6 @@ def test_karaoke_multiline_paints_first_screen_line_only():
     import io
 
     from PIL import Image
-
     from sboom_ha.image_render import HEIGHT, draw_lyrics_with_cover
 
     # Два «слова» по 20 символов → wrap на две экранные строки (line_width=22)
@@ -253,7 +252,6 @@ def test_karaoke_multiline_full_progress_paints_both_lines():
     import io
 
     from PIL import Image
-
     from sboom_ha.image_render import draw_lyrics_with_cover
 
     text = "а" * 20 + " " + "б" * 20

@@ -18,7 +18,7 @@
     "websockets>=13.0",
     "Pillow>=10.0"
   ],
-  "version": "0.14.2",
+  "version": "0.15.0",
   "zeroconf": [
     {
       "type": "_staros._tcp.local."
