@@ -28,20 +28,23 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(_FONT_PATH, size, encoding="UTF-8")
 
 
-def _draw_text(
-    ctx: ImageDraw.ImageDraw,
+def _layout_text(
     text: str,
     box: tuple[int, int, int, int],
     anchor: str,
-    fill,
     font_size: int,
-    line_width: int = 20,
-) -> None:
-    """Многострочный текст с автопереносом и smart-anchor."""
+    line_width: int,
+) -> tuple[list[str], int, str, int, int]:
+    """Разбиение текста на экранные строки + геометрия отрисовки.
+
+    Возвращает (lines, x, align, y0, font_size) — единый источник разметки
+    для обычного рендера и караоке-заливки (иначе они разъезжаются на
+    многострочных текстах). Логика уменьшения шрифта при переполнении —
+    исторически из _draw_text.
+    """
     lines = re.findall(rf"(.{{1,{line_width}}})(?:\s|$)", text)
     if (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4):
-        _draw_text(ctx, text, box, anchor, fill, font_size - 10, line_width + 3)
-        return
+        return _layout_text(text, box, anchor, font_size - 10, line_width + 3)
 
     if anchor[0] == "l":
         x, align = box[0], "la"
@@ -61,10 +64,49 @@ def _draw_text(
     else:
         raise ValueError(anchor)
 
+    return lines, x, align, y, font_size
+
+
+def _draw_text(
+    ctx: ImageDraw.ImageDraw,
+    text: str,
+    box: tuple[int, int, int, int],
+    anchor: str,
+    fill,
+    font_size: int,
+    line_width: int = 20,
+) -> None:
+    """Многострочный текст с автопереносом и smart-anchor."""
+    lines, x, align, y, font_size = _layout_text(text, box, anchor, font_size, line_width)
     font = _font(font_size)
     for line in lines:
         ctx.text((x, y), line, anchor=align, fill=fill, font=font)
         y += font_size
+
+
+def _karaoke_line_fills(lines: list[str], frac: float) -> list[float]:
+    """Доля закраски каждой экранной строки при общем прогрессе frac (0..1).
+
+    Прогресс распределяется ПО СИМВОЛАМ всего текста в порядке чтения:
+    сначала полностью закрашивается первая экранная строка, затем вторая
+    и т.д. Слово автоматически получает время пропорционально своей длине —
+    длинные слова «поются» дольше коротких.
+    """
+    total = sum(len(line) for line in lines)
+    if total == 0:
+        return [0.0] * len(lines)
+    done = max(0.0, min(1.0, frac)) * total
+    fills: list[float] = []
+    for line in lines:
+        if not line or done <= 0:
+            fills.append(0.0)
+        elif done >= len(line):
+            fills.append(1.0)
+            done -= len(line)
+        else:
+            fills.append(done / len(line))
+            done = 0.0
+    return fills
 
 
 def draw_cover(title: str | None, artist: str | None, cover: bytes | None) -> bytes:
@@ -161,24 +203,53 @@ def _draw_text_karaoke(
     """Строка с «заливкой» по мере пропевания (псевдо-караоке).
 
     Word-level тайминг из lrclib недоступен (line-level LRC), поэтому доля
-    прохождения строки считается линейной интерполяцией между таймстампами
-    соседних строк: текст рисуется белым, затем акцентным цветом через маску,
-    обрезанную по горизонтали на frac ширины бокса.
+    прохождения строки — линейная интерполяция между таймстампами соседних
+    строк. Закраска распределяется по символам текста в порядке чтения
+    (через переносы): слово получает время пропорционально длине, экранные
+    строки закрашиваются последовательно, а не одновременно.
     """
     frac = max(0.0, min(1.0, frac))
-    # Маска текста (L-канал): рисуем тем же _draw_text, что и обычный текст —
-    # перенос строк и anchor совпадают с некараоке-рендером пиксель в пиксель.
+    # Маска текста (L-канал) на той же разметке, что и обычный рендер.
+    lines, x, _align, y0, font_size = _layout_text(text, box, "mm", font_size, line_width)
+    font = _font(font_size)
     mask = Image.new("L", canvas.size, 0)
-    _draw_text(ImageDraw.Draw(mask), text, box, "mm", 255, font_size, line_width)
+    mctx = ImageDraw.Draw(mask)
+    y = y0
+    for line in lines:
+        mctx.text((x, y), line, anchor="ma", fill=255, font=font)
+        y += font_size
 
     white = Image.new("RGB", canvas.size, (255, 255, 255))
     canvas.paste(white, (0, 0), mask)
 
     if frac <= 0.0:
         return
+
+    # Построчный sweep: закраска идёт в порядке чтения через переносы.
+    # Единый вертикальный срез по всему боксу красил многострочный текст
+    # на всех строках одновременно — бессмыслица при чтении.
     sweep = mask.copy()
-    cut_x = box[0] + int(box[2] * frac)
-    ImageDraw.Draw(sweep).rectangle((cut_x, 0, canvas.width, canvas.height), fill=0)
+    sctx = ImageDraw.Draw(sweep)
+    y = y0
+    for line, fill_frac in zip(lines, _karaoke_line_fills(lines, frac)):
+        if fill_frac >= 1.0:
+            y += font_size
+            continue
+        if fill_frac <= 0.0:
+            cut = 0.0  # строка ещё не поётся — гасим целиком
+        else:
+            # Точный посимвольный срез внутри строки: ширина пропетой части
+            # по метрикам шрифта (центрированный anchor "ma" → левый край
+            # строки = центр − ширина/2).
+            chars = fill_frac * len(line)
+            i = int(chars)
+            w_full = font.getlength(line)
+            w_done = font.getlength(line[:i])
+            w_next = font.getlength(line[: min(i + 1, len(line))])
+            cut = (x - w_full / 2) + w_done + (chars - i) * (w_next - w_done)
+        sctx.rectangle((cut, y, canvas.width, y + font_size), fill=0)
+        y += font_size
+
     accent = Image.new("RGB", canvas.size, KARAOKE_ACCENT)
     canvas.paste(accent, (0, 0), sweep)
 

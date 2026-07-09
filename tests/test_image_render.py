@@ -181,3 +181,83 @@ def test_resize_jpeg_shrinks_to_requested_height():
 def test_resize_jpeg_noop_without_dimensions():
     src = draw_blank()
     assert resize_jpeg(src, None, None) is src
+
+
+# ─────────── посимвольная караоке-заливка (многострочные тексты) ───────────
+#
+# Регрессия: единый вертикальный срез по всему боксу красил многострочный
+# текст на всех экранных строках одновременно. Теперь закраска идёт в порядке
+# чтения: прогресс распределяется по символам, слово получает время
+# пропорционально длине.
+
+from sboom_ha.image_render import _karaoke_line_fills
+
+
+def test_karaoke_fills_sequential_lines():
+    """Прогресс 0.75 двух равных строк: первая целиком, вторая наполовину."""
+    assert _karaoke_line_fills(["aaaaa", "aaaaa"], 0.75) == [1.0, 0.5]
+
+
+def test_karaoke_fills_boundary_and_edges():
+    assert _karaoke_line_fills(["aaaaa", "aaaaa"], 0.5) == [1.0, 0.0]
+    assert _karaoke_line_fills(["aaaaa", "aaaaa"], 0.0) == [0.0, 0.0]
+    assert _karaoke_line_fills(["aaaaa", "aaaaa"], 1.0) == [1.0, 1.0]
+
+
+def test_karaoke_fills_weighted_by_length():
+    """Слова/строки получают время пропорционально длине: 8 символов из 10 —
+    это вся первая строка (8) и ничего от второй (2)."""
+    assert _karaoke_line_fills(["aaaaaaaa", "aa"], 0.8) == [1.0, 0.0]
+    fills = _karaoke_line_fills(["aaaaaaaa", "aa"], 0.9)
+    assert fills[0] == 1.0 and abs(fills[1] - 0.5) < 1e-9
+
+
+def test_karaoke_fills_empty_text_safe():
+    assert _karaoke_line_fills([], 0.5) == []
+    assert _karaoke_line_fills([""], 0.5) == [0.0]
+
+
+def _accent_present(img, y_from, y_to):
+    """Есть ли в горизонтальной полосе пиксели караоке-акцента (255,193,71)
+    с допуском на JPEG-сжатие."""
+    region = img.crop((0, y_from, img.width, y_to))
+    for r, g, b in region.getdata():
+        if r > 200 and 150 < g < 235 and b < 140:
+            return True
+    return False
+
+
+def test_karaoke_multiline_paints_first_screen_line_only():
+    """Прогресс 0.5 у текста из двух экранных строк: акцент есть в полосе
+    первой строки и ОТСУТСТВУЕТ в полосе второй. Старый рендер (общий срез)
+    красил обе полосы одновременно — этот тест его убивает."""
+    import io
+
+    from PIL import Image
+
+    from sboom_ha.image_render import HEIGHT, draw_lyrics_with_cover
+
+    # Два «слова» по 20 символов → wrap на две экранные строки (line_width=22)
+    text = "а" * 20 + " " + "б" * 20
+    jpeg = draw_lyrics_with_cover(None, text, None, None, None, line_progress=0.5)
+    img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+
+    # Геометрия из draw_lyrics_with_cover: box=(40, H/6, W-80, H/3), font 90,
+    # 2 строки → y0 = 120 + (240 - 180)//2 = 150; полосы строк: 150..240, 240..330.
+    assert HEIGHT == 720, "геометрия теста рассчитана под 720p"
+    assert _accent_present(img, 155, 235), "первая экранная строка должна быть закрашена"
+    assert not _accent_present(img, 245, 330), "вторая строка НЕ должна быть закрашена при 0.5"
+
+
+def test_karaoke_multiline_full_progress_paints_both_lines():
+    import io
+
+    from PIL import Image
+
+    from sboom_ha.image_render import draw_lyrics_with_cover
+
+    text = "а" * 20 + " " + "б" * 20
+    jpeg = draw_lyrics_with_cover(None, text, None, None, None, line_progress=1.0)
+    img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    assert _accent_present(img, 155, 235)
+    assert _accent_present(img, 245, 330)
