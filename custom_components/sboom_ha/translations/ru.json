@@ -225,6 +225,11 @@
       "lyrics_camera": {
         "name": "Lyrics на ТВ"
       }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Местоположение"
+      }
     }
   },
   "exceptions": {

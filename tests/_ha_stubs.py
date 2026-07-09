@@ -665,6 +665,7 @@ class Platform(str, Enum):
     SENSOR = "sensor"
     BINARY_SENSOR = "binary_sensor"
     CAMERA = "camera"
+    DEVICE_TRACKER = "device_tracker"
 
 
 class EntityCategory(str, Enum):
@@ -731,6 +732,16 @@ class Camera:
 
 class SensorEntity:
     pass
+
+
+class TrackerEntity:
+    pass
+
+
+class _SourceType(str, Enum):
+    GPS = "gps"
+    ROUTER = "router"
+    BLUETOOTH = "bluetooth"
 
 
 class ButtonEntity:
@@ -880,6 +891,11 @@ def install_stubs() -> None:
         RepeatMode=RepeatMode,
     )
     _make_module("homeassistant.components.camera", Camera=Camera)
+    _make_module(
+        "homeassistant.components.device_tracker",
+        TrackerEntity=TrackerEntity,
+        SourceType=_SourceType,
+    )
     _make_module("homeassistant.components.sensor", SensorEntity=SensorEntity)
     _make_module("homeassistant.components.button", ButtonEntity=ButtonEntity)
     _make_module("homeassistant.components.number", NumberEntity=NumberEntity)

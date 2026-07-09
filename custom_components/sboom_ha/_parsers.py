@@ -130,6 +130,17 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     if isinstance(settings, dict):
         ds.age_mode = settings.get("age_mode")
 
+    location = data.get("location")
+    if isinstance(location, dict):
+        lat, lon = location.get("lat"), location.get("lon")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            ds.latitude = float(lat)
+            ds.longitude = float(lon)
+        acc = location.get("accuracy")
+        if isinstance(acc, (int, float)):
+            ds.location_accuracy = round(acc)
+        ds.location_source = location.get("source")
+
     return ds
 
 

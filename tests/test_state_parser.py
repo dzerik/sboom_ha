@@ -229,3 +229,23 @@ def test_parse_device_state_full_real_capture():
     assert d.age_mode == "adult"
     assert d.alarm_ringing is False
     assert d.led_brightness == 100  # регрессия: старые поля не пострадали
+
+
+def test_parse_device_state_location():
+    """location {lat,lon,accuracy,source} → координаты (схема из реального захвата)."""
+    d = parse_device_state({
+        "location": {"accuracy": 8.0, "lat": 55.660927, "lon": 37.469685,
+                     "source": "wifi", "timestamp": 1777494329616}
+    })
+    assert d.latitude == 55.660927
+    assert d.longitude == 37.469685
+    assert d.location_accuracy == 8  # округлён до int (метры)
+    assert d.location_source == "wifi"
+
+
+def test_parse_device_state_location_partial_ignored():
+    """Битая/неполная координата не даёт полу-заполненного положения."""
+    d = parse_device_state({"location": {"lat": 55.6, "source": "wifi"}})  # без lon
+    assert d.latitude is None and d.longitude is None
+    assert d.location_source == "wifi"  # source читается независимо
+    assert parse_device_state({}).latitude is None
