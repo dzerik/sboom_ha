@@ -63,3 +63,63 @@ def test_calendar_event_is_none_without_device():
     coord = build_coordinator(state=None)
     cal = SboomScheduleCalendar(coord, coord.entry)
     assert cal._collect(datetime.now(UTC), datetime.now(UTC) + timedelta(days=1)) == []
+
+
+# ─────────── гейт перерисовки: не дёргать календарь без смены расписания ───────────
+
+def _calendar_and_writes():
+    """Календарь + счётчик async_write_ha_state."""
+    cal = _calendar_with()
+    cal._writes = 0
+    cal.async_write_ha_state = lambda: setattr(cal, "_writes", cal._writes + 1)
+    return cal
+
+
+def test_calendar_writes_on_first_update():
+    """Первый тик координатора — расписание «появилось» → перерисовка."""
+    cal = _calendar_and_writes()
+    cal._handle_coordinator_update()
+    assert cal._writes == 1
+
+
+def test_calendar_skips_update_when_schedule_unchanged():
+    """Тик координатора без смены расписания (например, обновилась только
+    громкость) не перерисовывает календарь."""
+    cal = _calendar_and_writes()
+    cal._handle_coordinator_update()  # первый → пишет
+    cal._handle_coordinator_update()  # то же расписание → пропуск
+    cal._handle_coordinator_update()
+    assert cal._writes == 1
+
+
+def test_calendar_ignores_ticking_timer():
+    """Убывающий timeLeftSec (таймер тикает) — НЕ изменение расписания:
+    абсолютное время окончания стабильно, календарь не перерисовываем."""
+    cal = _calendar_and_writes()
+    cal._handle_coordinator_update()
+    assert cal._writes == 1
+    # эмулируем poll: timeLeftSec уменьшился, всё остальное то же
+    cal.coordinator.state.device.timers[0]["timeLeftSec"] = 6000
+    cal._handle_coordinator_update()
+    assert cal._writes == 1, "тикающий таймер не должен дёргать календарь"
+
+
+def test_calendar_writes_when_alarm_added():
+    """Новый будильник — реальное изменение → перерисовка."""
+    cal = _calendar_and_writes()
+    cal._handle_coordinator_update()
+    assert cal._writes == 1
+    cal.coordinator.state.device.alarms.append({
+        "id": "new", "enabled": True, "description": "новый",
+        "ics": "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260720T070000Z\r\nUID:new\r\nEND:VEVENT\r\nEND:VCALENDAR",
+    })
+    cal._handle_coordinator_update()
+    assert cal._writes == 2, "добавление будильника должно перерисовать календарь"
+
+
+def test_calendar_writes_when_timer_removed():
+    cal = _calendar_and_writes()
+    cal._handle_coordinator_update()
+    cal.coordinator.state.device.timers.clear()
+    cal._handle_coordinator_update()
+    assert cal._writes == 2

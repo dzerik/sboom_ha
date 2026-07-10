@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
@@ -27,6 +28,10 @@ PARALLEL_UPDATES = 0
 
 # Горизонт для вычисления «ближайшего» события (state сущности).
 _DEFAULT_LOOKAHEAD = timedelta(days=90)
+
+# Sentinel: расписание ещё ни разу не вычислялось (отличить от «пустого» None,
+# который валиден когда device_state ещё нет).
+_UNSET = object()
 
 
 async def async_setup_entry(
@@ -47,6 +52,46 @@ class SboomScheduleCalendar(SboomEntity, CalendarEntity):
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{self._device_unique_prefix}_schedule"
+        self._schedule_key: Any = _UNSET
+
+    def _current_schedule_key(self) -> Any:
+        """Отпечаток расписания для гейта перерисовки.
+
+        НЕ включает timeLeftSec таймера: он убывает каждый poll, но абсолютное
+        время окончания стабильно — тикающий таймер не должен считаться
+        изменением. id + ics/intervalSec/reminderTime ловят появление,
+        удаление и редактирование событий.
+        """
+        dev = self.device_state
+        if dev is None:
+            return None
+        alarms = tuple(sorted(
+            (str(a.get("id")), a.get("ics"), bool(a.get("enabled", True)))
+            for a in dev.alarms if isinstance(a, dict)
+        ))
+        timers = tuple(sorted(
+            (str(t.get("id")), t.get("intervalSec"))
+            for t in dev.timers if isinstance(t, dict)
+        ))
+        rem = (dev.reminders or {}).get("reminders", {}).get("time_reminders", {})
+        reminders = tuple(sorted(
+            (str(r.get("id")), r.get("reminderTime"))
+            for items in (rem.values() if isinstance(rem, dict) else [])
+            if isinstance(items, list)
+            for r in items if isinstance(r, dict)
+        ))
+        return (alarms, timers, reminders)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        # Координатор дёргает listeners на каждый poll и push (трек/громкость).
+        # Расписание же меняется редко — перерисовываем календарь (пересчёт
+        # RRULE) только когда его отпечаток изменился.
+        key = self._current_schedule_key()
+        if key == self._schedule_key:
+            return
+        self._schedule_key = key
+        super()._handle_coordinator_update()
 
     def _collect(
         self, start: datetime, end: datetime, now: datetime | None = None

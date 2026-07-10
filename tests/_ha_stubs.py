@@ -623,6 +623,10 @@ class CoordinatorEntity(_Generic):
     def async_write_ha_state(self) -> None:
         pass
 
+    def _handle_coordinator_update(self) -> None:
+        # Реальный CoordinatorEntity пишет state на каждый тик координатора.
+        self.async_write_ha_state()
+
 
 # ── helpers.aiohttp_client / entity_platform / event ─────────────────────
 
