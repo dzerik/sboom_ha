@@ -20,10 +20,16 @@ from .image_render import (
     draw_blank,
     draw_cover_yandex,
     draw_lyrics_with_cover,
+    fallback_cover,
     resize_jpeg,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _cover_seed(track) -> str:
+    """Стабильный ключ трека для выбора фона-заглушки (один трек → один фон)."""
+    return track.track_id or f"{track.title or ''}|{','.join(track.artists or [])}"
 
 # Один MJPEG-стрим на сущность, данные из coordinator — параллелизм безразличен.
 PARALLEL_UPDATES = 0
@@ -256,21 +262,25 @@ class SboomLyricsCamera(SboomEntity, Camera):
     async def _fetch_cover_raw(self, track) -> bytes | None:
         # Каталог Zvuk → CDN по release_id; BT/радио → найденная по title+artist.
         url = cover_url(track) or self.coordinator.current_cover()
-        if self._cover_cache_url == url:
-            return self._cover_raw  # тот же URL (в т.ч. оба None) — из кэша
-        self._cover_cache_url = url
-        if not url:
-            self._cover_raw = None
-            return None
+        if url is not None:
+            if self._cover_cache_url == url and self._cover_raw is not None:
+                return self._cover_raw
+            raw = await self._download_cover(url)
+            if raw is not None:
+                self._cover_cache_url = url
+                self._cover_raw = raw
+                return raw
+        # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного экрана.
+        return fallback_cover(_cover_seed(track))
+
+    async def _download_cover(self, url: str) -> bytes | None:
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with self.coordinator.http_session.get(url, timeout=timeout) as r:
                 if r.status == 200:
-                    self._cover_raw = await r.read()
-                    return self._cover_raw
+                    return await r.read()
         except (TimeoutError, aiohttp.ClientError) as exc:
             _LOGGER.debug("cover fetch failed: %s", exc)
-        self._cover_raw = None
         return None
 
 

@@ -20,6 +20,7 @@ from sboom_ha.image_render import (
     draw_blank,
     draw_cover_yandex,
     draw_lyrics_with_cover,
+    fallback_cover,
     resize_jpeg,
 )
 
@@ -315,3 +316,36 @@ def test_karaoke_frame_renders_source_label():
     img = Image.open(io.BytesIO(withsrc)).convert("RGB")
     band = img.crop((0, 20, img.width, 70))
     assert any(r > 140 and g > 140 and b > 140 for r, g, b in band.getdata())
+
+
+# ─────────────── fallback_cover (заглушка вместо чёрного экрана) ───────────────
+
+def test_fallback_cover_returns_valid_bundled_jpeg():
+    """Заглушка отдаёт валидный JPEG из бандла (а не чёрный/пусто)."""
+    raw = fallback_cover("Artist|Song")
+    assert raw is not None
+    img = Image.open(io.BytesIO(raw))
+    assert img.format == "JPEG"
+    assert img.size[0] > 0
+
+
+def test_fallback_cover_stable_per_seed():
+    """Один и тот же seed → тот же фон (иначе фон мигал бы от кадра к кадру)."""
+    assert fallback_cover("Bonnie Tyler|Spell") == fallback_cover("Bonnie Tyler|Spell")
+
+
+def test_fallback_cover_varies_across_seeds():
+    """Разные треки распределяются по набору (хотя бы 2 разных фона на выборке)."""
+    seeds = [f"artist{i}|track{i}" for i in range(30)]
+    chosen = {fallback_cover(s) for s in seeds}
+    assert len(chosen) >= 2  # не все одинаковые — выбор реально зависит от seed
+
+
+def test_fallback_cover_renders_non_black_background():
+    """Кадр с заглушкой — не чёрный (есть цветной градиент под текстом)."""
+    frame = draw_lyrics_with_cover(
+        fallback_cover("X|Y"), "line", None, "Title", "Artist",
+    )
+    img = Image.open(io.BytesIO(frame)).convert("RGB")
+    # хоть один пиксель заметно цветной/светлее near-black (15,15,18)
+    assert any(sum(px) > 90 for px in img.getdata())

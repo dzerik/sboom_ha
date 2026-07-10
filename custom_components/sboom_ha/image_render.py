@@ -164,6 +164,39 @@ def resize_jpeg(jpeg: bytes, width: int | None, height: int | None) -> bytes:
         return jpeg
 
 
+_BG_DIR = os.path.join(os.path.dirname(__file__), "backgrounds")
+
+
+@lru_cache(maxsize=1)
+def _fallback_bgs() -> tuple[bytes, ...]:
+    """Бандл свободных градиентов (StockSnap/Flickr, CC0 1.0) — фон когда обложки нет."""
+    if not os.path.isdir(_BG_DIR):
+        return ()
+    files = sorted(f for f in os.listdir(_BG_DIR) if f.endswith(".jpg"))
+    out = []
+    for name in files:
+        try:
+            with open(os.path.join(_BG_DIR, name), "rb") as fh:
+                out.append(fh.read())
+        except OSError:
+            continue
+    return tuple(out)
+
+
+def fallback_cover(seed: str | None) -> bytes | None:
+    """Заглушка-фон: стабильно-случайный градиент по seed (одному треку — один фон).
+
+    Вместо чёрного экрана, когда обложка не нашлась (BT/радио или редкий трек).
+    Выбор детерминирован по seed → фон не мигает от кадра к кадру, но у разных
+    треков разный.
+    """
+    bgs = _fallback_bgs()
+    if not bgs:
+        return None
+    idx = (sum(seed.encode("utf-8", "ignore")) if seed else 0) % len(bgs)
+    return bgs[idx]
+
+
 @lru_cache(maxsize=4)
 def _blur_bg_cached(cover: bytes | None) -> Image.Image:
     """Cover→fill→blur→darken — фон в стиле Яндекс.Музыки.
