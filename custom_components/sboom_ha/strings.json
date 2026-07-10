@@ -77,7 +77,8 @@
           "availability_threshold": "Disconnect threshold (failed reconnects)",
           "lyrics_enabled": "Fetch synced lyrics from Lrclib.net",
           "lyrics_netease_fallback": "Use NetEase as a fallback lyrics source",
-          "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)"
+          "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)",
+          "karaoke_fill": "Karaoke fill (highlight the line as it is sung)"
         }
       }
     }

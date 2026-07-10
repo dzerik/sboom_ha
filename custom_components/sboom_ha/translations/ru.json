@@ -77,7 +77,8 @@
           "availability_threshold": "Порог недоступности (неудачных reconnect'ов)",
           "lyrics_enabled": "Загружать synced lyrics с Lrclib.net",
           "lyrics_netease_fallback": "Использовать NetEase как резервный источник текстов",
-          "lyrics_offset": "Сдвиг текста песни, секунды (+ раньше / − позже)"
+          "lyrics_offset": "Сдвиг текста песни, секунды (+ раньше / − позже)",
+          "karaoke_fill": "Караоке-закраска (подсветка строки по мере пропевания)"
         }
       }
     }

@@ -39,6 +39,7 @@ from .const import (
     CONF_PIN_ACCESS_TOKEN,
     CONF_PORT,
     DEFAULT_AVAILABILITY_THRESHOLD,
+    DEFAULT_KARAOKE_FILL,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_LYRICS_NETEASE,
@@ -52,6 +53,7 @@ from .const import (
     MDNS_PROP_NAME,
     MDNS_PROP_TYPE,
     OPT_AVAILABILITY_THRESHOLD,
+    OPT_KARAOKE_FILL,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
     OPT_LYRICS_NETEASE,
@@ -137,6 +139,10 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                         OPT_LYRICS_OFFSET,
                         default=opts.get(OPT_LYRICS_OFFSET, DEFAULT_LYRICS_OFFSET),
                     ): vol.All(_seconds(-10, 10, 0.1), vol.Coerce(float)),
+                    vol.Optional(
+                        OPT_KARAOKE_FILL,
+                        default=opts.get(OPT_KARAOKE_FILL, DEFAULT_KARAOKE_FILL),
+                    ): bool,
                 }
             ),
         )

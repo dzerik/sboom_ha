@@ -120,11 +120,12 @@ class SboomLyricsCamera(SboomEntity, Camera):
         artist = ", ".join(track.artists) if track.artists else None
         duration = float(track.duration_sec) if track.duration_sec else None
         progress = (pos / duration) if duration and duration > 0 else None
+        fill = frac if (track.playing and self.coordinator.karaoke_fill) else None
         return await asyncio.to_thread(
             draw_lyrics_with_cover,
             cover_raw, cur, nxt, track.title, artist,
             progress, pos, duration,
-            frac if track.playing else None,
+            fill,
             source_label(track),
         )
 
@@ -202,19 +203,22 @@ class SboomLyricsCamera(SboomEntity, Camera):
 
             idx, cur, nxt, frac = _timeline_at(timeline, pos)
             playing = bool(track.playing)
+            # Закраска — опция (по умолчанию off): при off строка статична,
+            # frac в рендер не идёт и не участвует в кэш-ключе (нет лишних кадров).
+            fill = frac if (playing and self.coordinator.karaoke_fill) else None
 
             duration = float(track.duration_sec) if track.duration_sec else None
             progress = (pos / duration) if duration and duration > 0 else None
             # Корзины заливки: шаг 2.5% ширины строки — визуально плавно,
             # но без перерисовки кадров, где заливка не сдвинулась.
-            frac_bucket = int(frac * 40) if frac is not None else None
+            frac_bucket = int(fill * 40) if fill is not None else None
             key = (idx, int(pos), frac_bucket)
             if key != last_key:
                 jpeg = await asyncio.to_thread(
                     draw_lyrics_with_cover,
                     cover_raw, cur, nxt, track.title, artist,
                     progress, pos, duration,
-                    frac if playing else None,
+                    fill,
                     source_label(track),
                 )
                 await _write_jpeg(response, jpeg)

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from sboom_ha.const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
+    DEFAULT_KARAOKE_FILL,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_VOLUME_POLL_INTERVAL,
     OPT_AVAILABILITY_THRESHOLD,
+    OPT_KARAOKE_FILL,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
     OPT_VOLUME_POLL_INTERVAL,
@@ -59,6 +61,16 @@ def test_availability_threshold_override():
 def test_lyrics_enabled_override():
     coord = _coord_with_options(**{OPT_LYRICS_ENABLED: False})
     assert coord._lyrics_enabled is False
+
+
+def test_karaoke_fill_defaults_off():
+    """Закраска караоке по умолчанию выключена (статичный текст)."""
+    assert DEFAULT_KARAOKE_FILL is False
+    assert _coord_with_options().karaoke_fill is False
+
+
+def test_karaoke_fill_override():
+    assert _coord_with_options(**{OPT_KARAOKE_FILL: True}).karaoke_fill is True
 
 
 # ─────────────────── lyrics_enabled gating ───────────────────

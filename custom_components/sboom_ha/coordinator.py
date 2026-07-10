@@ -28,6 +28,7 @@ from .const import (
     CONF_PIN_ACCESS_TOKEN,
     CONF_PORT,
     DEFAULT_AVAILABILITY_THRESHOLD,
+    DEFAULT_KARAOKE_FILL,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_LYRICS_NETEASE,
@@ -39,6 +40,7 @@ from .const import (
     OP_GET_META_DATA,
     OP_GET_STATE,
     OPT_AVAILABILITY_THRESHOLD,
+    OPT_KARAOKE_FILL,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
     OPT_LYRICS_NETEASE,
@@ -89,6 +91,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._lyrics_enabled = bool(opts.get(OPT_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED))
         self._lyrics_netease = bool(opts.get(OPT_LYRICS_NETEASE, DEFAULT_LYRICS_NETEASE))
+        # Посимвольная караоке-закраска строки (по умолчанию off — статичный текст).
+        self.karaoke_fill = bool(opts.get(OPT_KARAOKE_FILL, DEFAULT_KARAOKE_FILL))
         # Пользовательский сдвиг лирики (сек): + = строки раньше, − = позже.
         self.lyrics_offset = float(opts.get(OPT_LYRICS_OFFSET, DEFAULT_LYRICS_OFFSET))
 
