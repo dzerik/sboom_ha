@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.19.1]
+
+### Changed
+- Документация синхронизирована под 0.19: карточка HACS `info.md` и mermaid-диаграмма README дополнены Calendar-сущностью.
+
 ## [0.19.0]
 
 ### Added

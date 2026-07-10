@@ -351,7 +351,7 @@ flowchart LR
         CF[config_flow.py]
         CO["coordinator<br/>push + poll fallback"]
         LM["lyrics_manager<br/>кэш + персист"]
-        ENT["media_player • camera • sensor •<br/>binary_sensor • button • switch •<br/>number • select • device_tracker"]
+        ENT["media_player • camera • sensor •<br/>binary_sensor • button • switch •<br/>number • select • device_tracker • calendar"]
         CF --> CO
         CO --> ENT
         CO --> LM
