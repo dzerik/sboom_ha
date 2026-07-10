@@ -260,9 +260,10 @@ async def main() -> None:
     snapshot["cli_commands"] = cli_commands()
     snapshot["libiio"] = libiio_devices()
 
-    # версия прошивки из sys info (для имени снимка)
-    fw = _fw_version(snapshot["cli_commands"])
+    # версия прошивки из sys info (short — для имени снимка, full — для diff)
+    fw, fw_build = _fw_version(snapshot["cli_commands"])
     snapshot["fw_version"] = fw
+    snapshot["fw_build"] = fw_build
     # WSS-часть (op-map, GET_STATE) достоверна только без активной HA-сессии.
     snapshot["wss_reliable"] = isinstance(snapshot.get("get_state_schema"), dict)
 
@@ -278,7 +279,10 @@ async def main() -> None:
         _print_diff(prev, snapshot)
 
 
-def _fw_version(cli: dict) -> str:
+def _fw_version(cli: dict) -> tuple[str, str]:
+    """→ (short, full). short='26.1.7' — имя файла; full с git-хешем
+    ('26.1.7+0.git.0a87d0bc...') ловит CI-пересборку при том же номере."""
+    short, full = "unknown", "unknown"
     # sys info недоступен в cli_commands — снимем отдельно быстро
     try:
         s = socket.create_connection((HOST, 4242), timeout=3)
@@ -303,10 +307,12 @@ def _fw_version(cli: dict) -> str:
         s.close()
         for line in buf.decode("utf-8", "ignore").splitlines():
             if "App version short" in line:
-                return line.split(":", 1)[1].strip()
+                short = line.split(":", 1)[1].strip()
+            elif "App version" in line:  # полная строка с git-хешем
+                full = line.split(":", 1)[1].strip()
     except OSError:
         pass
-    return "unknown"
+    return short, full
 
 
 def _latest_snapshot() -> dict | None:
