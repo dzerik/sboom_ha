@@ -242,3 +242,33 @@ async def test_mute_patches_coordinator_state_optimistically():
     await mp.async_mute_volume(False)
     assert coord.state.muted is False
     assert calls == ["mute", "unmute"]
+
+
+def test_media_player_rich_attributes_from_fixture():
+    """extra_state_attributes выставляет контекст трека (плейлист/тип/источник)."""
+    from pathlib import Path
+
+    from sboom_ha.api import SberSpeakerClient
+
+    from tests._fakes import build_coordinator, make_state
+
+    raw = (Path(__file__).parent / "fixtures" / "track_metadata.json").read_bytes()
+    track = SberSpeakerClient.parse_track(raw)
+    coord = build_coordinator(track=track, state=make_state())
+    from sboom_ha.media_player import SboomMediaPlayer
+    mp = SboomMediaPlayer(coord, coord.entry)
+    attrs = mp.extra_state_attributes
+    assert attrs["playlist"] == "Персональная волна"
+    assert attrs["playlist_type"] == "endless"
+    assert attrs["media_source"] == "MUSIC"
+    assert attrs["provider"] == "zvuk"
+    assert attrs["buffering"] is False
+
+
+def test_media_player_no_attributes_without_track():
+    from sboom_ha.media_player import SboomMediaPlayer
+
+    from tests._fakes import build_coordinator, make_state
+    coord = build_coordinator(track=None, state=make_state())
+    mp = SboomMediaPlayer(coord, coord.entry)
+    assert mp.extra_state_attributes is None

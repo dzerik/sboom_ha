@@ -14,6 +14,12 @@ class TrackInfo:
     release_id: str | None = None
     artist_ids: list[str] = field(default_factory=list)
     playlist_title: str | None = None
+    playlist_type: str | None = None      # playlistType: endless (волна) / album / user / …
+    playlist_id: str | None = None        # playlistId
+    playlist_liked: bool | None = None    # playlistLike — лайкнут ли плейлист/станция
+    media_source: str | None = None       # mediaSource: MUSIC / RADIO / PODCAST / …
+    child_mode: bool | None = None        # childMode — детский режим
+    buffering: bool | None = None         # playingPending — идёт загрузка/буферизация
     provider: str | None = None
     duration_sec: int | None = None
     position_sec: int | None = None

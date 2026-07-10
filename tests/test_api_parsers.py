@@ -279,3 +279,28 @@ def test_parse_track_has_lyrics_none_when_absent():
     """Нет hasLyrics — поле остаётся None (не False): 'неизвестно' ≠ 'нет текста'."""
     raw = b'{"trackId":"42","title":"X","artists":[]}'
     assert SberSpeakerClient.parse_track(raw).has_lyrics is None
+
+
+def test_parse_track_rich_now_playing_fields():
+    """Богатый Now Playing из реального live-захвата (tests/fixtures/track_metadata.json):
+    playlist/type/id/source/childMode/playingPending парсятся."""
+    from pathlib import Path
+    raw = (Path(__file__).parent / "fixtures" / "track_metadata.json").read_bytes()
+    t = SberSpeakerClient.parse_track(raw)
+    assert t is not None
+    assert t.playlist_title == "Персональная волна"
+    assert t.playlist_type == "endless"
+    assert t.playlist_id == "9999"
+    assert t.media_source == "MUSIC"
+    assert t.playlist_liked is False
+    assert t.child_mode is False
+    assert t.buffering is False
+
+
+def test_parse_track_rich_fields_none_when_absent():
+    """Минимальный payload — новые поля None (не False), «неизвестно» ≠ «выключено»."""
+    t = SberSpeakerClient.parse_track(b'{"trackId":"1","title":"X","artists":[]}')
+    assert t.playlist_type is None
+    assert t.media_source is None
+    assert t.child_mode is None
+    assert t.buffering is None

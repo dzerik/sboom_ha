@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.20.0]
+
+### Added
+- **Богатый Now Playing** — контекст трека в атрибутах `media_player`: `playlist` (название станции/плейлиста, напр. «Персональная волна»), `playlist_type` (endless/album/user), `media_source` (MUSIC/RADIO/…), `provider`, `playlist_liked`, `child_mode`, `buffering`. Всё уже приходило в metadata колонки — раньше просто не выставлялось (а `playlistTitle` и вовсе парсился, но терялся). Поля подтверждены живым захватом при переключении треков.
+
 ## [0.19.2]
 
 ### Changed

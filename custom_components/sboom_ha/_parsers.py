@@ -350,9 +350,20 @@ def parse_track(raw: bytes) -> TrackInfo | None:
     ti.title = data.get("title")
     ti.track_id = str(data.get("trackId")) if data.get("trackId") else None
     ti.playlist_title = data.get("playlistTitle") or outer.get("playlistTitle")
+    ti.playlist_type = data.get("playlistType") or outer.get("playlistType")
+    pid = data.get("playlistId") or outer.get("playlistId")
+    ti.playlist_id = str(pid) if pid is not None else None
+    ti.media_source = data.get("mediaSource") or outer.get("mediaSource")
     ti.provider = data.get("provider") or outer.get("provider")
     ti.explicit = bool(data.get("explicit", False))
     ti.liked = bool(data.get("like", False))
+    for src in (data, outer):
+        if "playlistLike" in src:
+            ti.playlist_liked = bool(src["playlistLike"])
+        if "childMode" in src:
+            ti.child_mode = bool(src["childMode"])
+        if "playingPending" in src:
+            ti.buffering = bool(src["playingPending"])
     if "hasLyrics" in data:
         ti.has_lyrics = bool(data.get("hasLyrics"))
 

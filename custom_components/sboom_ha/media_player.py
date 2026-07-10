@@ -158,6 +158,33 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
         """Cover URLs are public CDN — let HA hand them to clients directly."""
         return True
 
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        """Контекст трека для дашбордов: плейлист/станция, тип, источник.
+
+        Всё уже приходит в metadata — раньше просто не выставлялось.
+        None-поля опускаем, чтобы не засорять атрибуты.
+        """
+        t = self.coordinator.track
+        if t is None:
+            return None
+        attrs: dict[str, object] = {}
+        if t.playlist_title:
+            attrs["playlist"] = t.playlist_title
+        if t.playlist_type:
+            attrs["playlist_type"] = t.playlist_type  # endless (волна) / album / user
+        if t.media_source:
+            attrs["media_source"] = t.media_source     # MUSIC / RADIO / PODCAST
+        if t.provider:
+            attrs["provider"] = t.provider
+        if t.playlist_liked is not None:
+            attrs["playlist_liked"] = t.playlist_liked
+        if t.child_mode is not None:
+            attrs["child_mode"] = t.child_mode
+        if t.buffering is not None:
+            attrs["buffering"] = t.buffering
+        return attrs or None
+
     # ─────────────────── commands ───────────────────
     #
     # Политика подтверждения: volume/mute не приходят push'ем, поэтому после

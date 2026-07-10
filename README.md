@@ -15,6 +15,7 @@
 ## Возможности
 
 ### Media Player (`media_player.<name>`)
+- 📻 Контекст трека в атрибутах: `playlist` (название станции/плейлиста, напр. «Персональная волна»), `playlist_type` (endless/album/user), `media_source` (MUSIC/RADIO), `provider`, `buffering`, `child_mode`
 - ▶️ Play / ⏸ Pause / ⏭ Next / ⏮ Previous
 - 🔊 Volume / 🔇 Mute / Volume Up/Down
 - ⏩ Seek по позиции трека
