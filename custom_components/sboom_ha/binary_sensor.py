@@ -29,6 +29,7 @@ class SboomBinarySensorSpec:
     translation_key: str
     icon: str | None = None
     is_on_fn: Callable[[SboomCoordinator], bool | None]
+    attrs_fn: Callable[[SboomCoordinator], dict | None] | None = None
     device_class: BinarySensorDeviceClass | None = None
     entity_category: EntityCategory | None = None
     enabled_default: bool = True
@@ -81,13 +82,18 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda c: dev.home_security if (dev := _dev(c)) else None,
     ),
-    # Идёт «утреннее шоу».
+    # Идёт «утреннее шоу»; from_show (запущено из шоу) — в атрибутах.
     SboomBinarySensorSpec(
         key="morning_show",
         translation_key="morning_show",
         icon="mdi:weather-sunset-up",
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda c: dev.in_morning_show if (dev := _dev(c)) else None,
+        attrs_fn=lambda c: (
+            {"from_show": dev.morning_show_from}
+            if (dev := _dev(c)) and dev.morning_show_from is not None
+            else None
+        ),
     ),
     # Будильник/таймер звонит прямо сейчас — идеальный триггер для сценариев
     # пробуждения (alarm.playing из GET_STATE).
@@ -159,3 +165,9 @@ class SboomDeviceBinarySensor(SboomEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self._spec.is_on_fn(self.coordinator)
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        if self._spec.attrs_fn is None:
+            return None
+        return self._spec.attrs_fn(self.coordinator)

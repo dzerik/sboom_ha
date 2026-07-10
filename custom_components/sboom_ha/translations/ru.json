@@ -196,6 +196,12 @@
       },
       "next_timer": {
         "name": "Следующий таймер"
+      },
+      "firmware_channel": {
+        "name": "Канал прошивки"
+      },
+      "foreground_app": {
+        "name": "Приложение на экране"
       }
     },
     "binary_sensor": {

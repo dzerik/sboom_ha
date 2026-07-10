@@ -79,15 +79,18 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     # active_app — приложение, которое реально играет (state.player.playing).
     # background_apps — самотасующийся z-order стек, поэтому брать [0] нельзя:
     # сенсор флапал бы каждый poll. Если ничего не играет — active_app=None.
+    # app_stack — весь стек имён (порядок = z-order) для атрибутов.
     apps = data.get("background_apps")
     if isinstance(apps, list):
         for app in apps:
             if not isinstance(app, dict):
                 continue
+            name = (app.get("app_info") or {}).get("systemName")
+            if name:
+                ds.app_stack.append(name)
             player = (app.get("state") or {}).get("player")
-            if isinstance(player, dict) and player.get("playing") is True:
-                ds.active_app = (app.get("app_info") or {}).get("systemName")
-                break
+            if ds.active_app is None and isinstance(player, dict) and player.get("playing") is True:
+                ds.active_app = name
 
     assistant = data.get("assistant")
     if isinstance(assistant, dict):
@@ -115,10 +118,15 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     show = data.get("morning_show")
     if isinstance(show, dict):
         ds.in_morning_show = show.get("in_show")
+        if "from_show" in show:
+            ds.morning_show_from = bool(show.get("from_show"))
 
     tm = data.get("time")
     if isinstance(tm, dict):
         ds.timezone_id = tm.get("timezone_id")
+        off = tm.get("timezone_offset_sec")
+        if isinstance(off, int):
+            ds.timezone_offset_sec = off
 
     ts = data.get("timesync")
     if isinstance(ts, dict):
@@ -129,6 +137,18 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     settings = data.get("user_settings")
     if isinstance(settings, dict):
         ds.age_mode = settings.get("age_mode")
+        if "multi_profile" in settings:
+            ds.multi_profile = bool(settings.get("multi_profile"))
+        if "enable_child_voice_explicit" in settings:
+            ds.child_voice_explicit = bool(settings.get("enable_child_voice_explicit"))
+
+    segments = data.get("device_segments")
+    if isinstance(segments, list) and segments:
+        ds.firmware_channel = ", ".join(str(s) for s in segments)
+
+    current = data.get("current_app")
+    if isinstance(current, dict):
+        ds.foreground_app = (current.get("app_info") or {}).get("systemName")
 
     reminders = data.get("reminders")
     if isinstance(reminders, dict):

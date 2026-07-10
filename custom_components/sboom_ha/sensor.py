@@ -97,12 +97,23 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
             next_timer(dev.timers, datetime.now(UTC)) if (dev := _dev(c)) else None
         ),
     ),
-    # Активное приложение колонки (music/bluetooth/news/…).
+    # Активное (играющее) приложение; весь z-order стек — в атрибутах.
     SboomSensorSpec(
         key="active_app",
         translation_key="active_app",
         icon="mdi:application",
         value_fn=lambda c: dev.active_app if (dev := _dev(c)) else None,
+        attrs_fn=lambda c: (
+            {"app_stack": dev.app_stack} if (dev := _dev(c)) and dev.app_stack else None
+        ),
+    ),
+    # Приложение на переднем плане (current_app) — в отличие от active_app
+    # (играющее). Пусто, когда ничего не открыто.
+    SboomSensorSpec(
+        key="foreground_app",
+        translation_key="foreground_app",
+        icon="mdi:cellphone-screenshot",
+        value_fn=lambda c: dev.foreground_app if (dev := _dev(c)) else None,
     ),
     # Персона голосового ассистента (afina/joy/sber).
     SboomSensorSpec(
@@ -149,7 +160,16 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         enabled_default=False,
         value_fn=lambda c: dev.network_ip if (dev := _dev(c)) else None,
     ),
-    # Часовой пояс колонки (time.timezone_id). Diagnostic.
+    # Канал прошивки (device_segments, напр. "OpenBeta"). Diagnostic.
+    SboomSensorSpec(
+        key="firmware_channel",
+        translation_key="firmware_channel",
+        icon="mdi:test-tube",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: dev.firmware_channel if (dev := _dev(c)) else None,
+    ),
+    # Часовой пояс колонки (time.timezone_id) + смещение в атрибутах. Diagnostic.
     SboomSensorSpec(
         key="timezone",
         translation_key="timezone",
@@ -157,8 +177,13 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
         value_fn=lambda c: dev.timezone_id if (dev := _dev(c)) else None,
+        attrs_fn=lambda c: (
+            {"offset_hours": dev.timezone_offset_sec / 3600}
+            if (dev := _dev(c)) and dev.timezone_offset_sec is not None
+            else None
+        ),
     ),
-    # Возрастной режим профиля (user_settings.age_mode: adult/child). Diagnostic.
+    # Возрастной режим профиля (user_settings). Профильные флаги — в атрибутах.
     SboomSensorSpec(
         key="age_mode",
         translation_key="age_mode",
@@ -166,6 +191,14 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
         value_fn=lambda c: dev.age_mode if (dev := _dev(c)) else None,
+        attrs_fn=lambda c: (
+            {
+                "multi_profile": dev.multi_profile,
+                "child_voice_explicit": dev.child_voice_explicit,
+            }
+            if (dev := _dev(c)) and dev.multi_profile is not None
+            else None
+        ),
     ),
     # Рассинхрон часов колонки и HA (сек): device_unixtime − now. Помогает
     # диагностировать сдвиг караоке/позиции. Значение включает возраст poll'а

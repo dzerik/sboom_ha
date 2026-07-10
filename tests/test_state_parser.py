@@ -300,3 +300,35 @@ def test_next_alarm_timer_sensors_from_fixture():
     assert next_alarm(coord.state.device.alarms, now) == datetime(2026, 7, 13, 4, 0, 40, tzinfo=UTC)
     # таймер: осталось 6489с от now
     assert next_timer(coord.state.device.timers, now) == now + timedelta(seconds=6489)
+
+
+def test_parse_device_state_new_unused_fields():
+    """device_segments, current_app, user_settings-флаги, morning_show.from_show,
+    time.timezone_offset_sec, background_apps z-order — из реального GET_STATE."""
+    d = parse_device_state({
+        "device_segments": ["OpenBeta"],
+        "current_app": {"app_info": {"systemName": "music"}, "state": {}},
+        "user_settings": {"age_mode": "adult", "multi_profile": False,
+                          "enable_child_voice_explicit": True},
+        "morning_show": {"in_show": False, "from_show": True},
+        "time": {"timezone_id": "Europe/Moscow", "timezone_offset_sec": 10800},
+        "background_apps": [
+            {"app_info": {"systemName": "pager"}, "state": {}},
+            {"app_info": {"systemName": "music"}, "state": {"player": {"playing": True}}},
+        ],
+    })
+    assert d.firmware_channel == "OpenBeta"
+    assert d.foreground_app == "music"
+    assert d.multi_profile is False
+    assert d.child_voice_explicit is True
+    assert d.morning_show_from is True
+    assert d.timezone_offset_sec == 10800
+    assert d.app_stack == ["pager", "music"]  # весь стек в z-order
+    assert d.active_app == "music"             # играющее — по-прежнему music
+
+
+def test_parse_device_state_empty_current_app():
+    """current_app пуст (ничего не открыто) → foreground_app None, не падаем."""
+    d = parse_device_state({"current_app": {"app_info": {}, "state": {}}})
+    assert d.foreground_app is None
+    assert parse_device_state({"device_segments": []}).firmware_channel is None

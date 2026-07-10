@@ -65,6 +65,13 @@ class DeviceState:
     timezone_id: str | None = None          # time.timezone_id (напр. "Europe/Moscow")
     device_unixtime: float | None = None    # timesync.unixtime — часы колонки (для диагностики skew)
     age_mode: str | None = None             # user_settings.age_mode (adult/child)
+    multi_profile: bool | None = None       # user_settings.multi_profile
+    child_voice_explicit: bool | None = None  # user_settings.enable_child_voice_explicit
+    timezone_offset_sec: int | None = None  # time.timezone_offset_sec (напр. 10800 = +3ч)
+    firmware_channel: str | None = None     # device_segments (напр. "OpenBeta")
+    foreground_app: str | None = None       # current_app.app_info.systemName (на переднем плане)
+    app_stack: list[str] = field(default_factory=list)  # background_apps systemName (z-order)
+    morning_show_from: bool | None = None   # morning_show.from_show
     reminders: dict[str, Any] = field(default_factory=dict)  # reminders.reminders (сырой блок)
     # location: колонка сама себя позиционирует по Wi-Fi (location.source="wifi").
     latitude: float | None = None           # location.lat

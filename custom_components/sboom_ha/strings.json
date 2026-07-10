@@ -196,6 +196,12 @@
       },
       "next_timer": {
         "name": "Next timer"
+      },
+      "firmware_channel": {
+        "name": "Firmware channel"
+      },
+      "foreground_app": {
+        "name": "Foreground app"
       }
     },
     "binary_sensor": {
