@@ -261,8 +261,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._connect_and_sync()
                 session_started = time.monotonic()
 
-                # Держим соединение через KeepAlive. Track-changes приходят
-                # push-events через _handle_event (см. ниже).
+                # Транспорт держит WS ping/pong (см. api.connect); op 18
+                # keep-alive шлём дополнительно как application-level страховку
+                # (эффект не изолирован — см. OP_KEEP_ALIVE в const.py).
+                # Track-changes приходят push-events через _handle_event.
                 while not self._stopping:
                     # Ждём либо истечения keepalive-интервала, либо сигнала
                     # обрыва от listen-loop — что наступит раньше. Так разрыв

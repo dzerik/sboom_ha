@@ -41,6 +41,12 @@ OP_SET_VOLUME        = 14
 OP_SET_TRACK_POS     = 15
 OP_MEDIA_COMMAND     = 16
 OP_GET_PLAYING_QUEUE = 17
+# op 18: предположительно keep-alive (по наблюдению за поведением клиента).
+# Фаззингом НЕ подтверждён — на пустой/простой запрос молчит (timeout).
+# Эксперимент показал: транспортный WS ping/pong держит сессию сам (≥150 c
+# idle без op 18 — соединение живо), так что для поддержания связи op 18
+# избыточен. Оставлен как дешёвая (fire-and-forget) страховка на случай
+# application-level idle-таймаута на длинных паузах, который мы не проверяли.
 OP_KEEP_ALIVE        = 18
 OP_GET_PAIRED_BT     = 19  # список спаренных Bluetooth-устройств
 OP_BT_DEVICE_COMMAND = 20  # команда BT-устройству (connect/disconnect/remove)
