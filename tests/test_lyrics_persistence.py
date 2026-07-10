@@ -66,6 +66,17 @@ def test_synthetic_key_from_title_and_artists():
     assert _synthetic_key(make_track(title=None, artists=["A"], track_id=None)) is None
 
 
+def test_synthetic_key_excludes_radio():
+    """Радио исключено из караоке: позиция эфирная, синк невозможен → ключ None."""
+    radio = make_track(title="Mama, I'm Coming Home", artists=["Ozzy Osbourne"],
+                       track_id=None)
+    radio.media_source = "RADIO"
+    assert _synthetic_key(radio) is None
+    bt = make_track(title="Song", artists=["Artist"], track_id=None)
+    bt.media_source = "BLUETOOTH"
+    assert _synthetic_key(bt) == "song|artist"  # BT — не радио, ключ есть
+
+
 def test_current_for_bt_track_uses_volatile_slot_not_catalog():
     """BT/радио (track_id=None) обслуживается волатильным слотом по synthetic-ключу."""
     lm = build_coordinator().lyrics

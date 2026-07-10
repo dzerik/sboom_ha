@@ -32,7 +32,14 @@ LYRICS_SAVE_DELAY_SEC = 30
 
 
 def _synthetic_key(track: TrackInfo) -> str | None:
-    """Ключ для НЕкаталожного трека (BT/радио, без track_id): title|artists."""
+    """Ключ для НЕкаталожного трека без track_id (напр. Bluetooth): title|artists.
+
+    Радио исключено сознательно: колонка отдаёт позицию ЭФИРА (стрима), а не
+    песни (напр. 1224 c при песне 36–250 c) — синхронизировать лирику нечем,
+    караоке для радио смысла не имеет. None → fetch и current_for его пропустят.
+    """
+    if track.media_source == "RADIO":
+        return None
     if track.title and track.artists:
         return f"{track.title}|{','.join(track.artists)}".lower()
     return None

@@ -20,6 +20,7 @@ from ._schedule import next_alarm, next_timer
 from .coordinator import SboomCoordinator
 from .helpers import lyrics_position
 from .lyrics_client import current_line
+from .lyrics_manager import _synthetic_key
 
 # Read-only сенсоры, данные из coordinator — параллелизм безразличен.
 PARALLEL_UPDATES = 0
@@ -542,7 +543,10 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        if not self.coordinator.track or not self.coordinator.track.track_id:
+        track = self.coordinator.track
+        # Лирика возможна для каталога (track_id) и Bluetooth (synthetic-ключ);
+        # радио исключено (позиция эфирная — синк невозможен → _synthetic_key None).
+        if not track or (not track.track_id and _synthetic_key(track) is None):
             return "no_track"
         lyrics = self.coordinator.current_lyrics()
         if lyrics is None:
