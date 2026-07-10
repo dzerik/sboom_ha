@@ -1,7 +1,9 @@
 """Тесты парсера подсистем GET_STATE (DeviceState) и обновлённого parse_state."""
 from __future__ import annotations
 
+from sboom_ha._models import DeviceState
 from sboom_ha._parsers import parse_device_state, parse_state
+from sboom_ha.sensor import _link_attrs, _link_count
 
 # ─────────────────────── parse_device_state ───────────────────────
 
@@ -41,6 +43,88 @@ def test_parse_device_state_multiroom():
     )
     assert d.multiroom_mode == "NONE"
     assert d.stereo_pair_active is True
+
+
+def test_parse_device_state_device_links_populated():
+    """Заполненный слой связки (farfield/cast/стереопара) → поля модели.
+
+    На нашей одиночной колонке всё пусто, поэтому маппинг wire→model
+    невозможно проверить вживую — этот тест единственная защита от его
+    молчаливой поломки при рефакторинге парсера.
+    """
+    d = parse_device_state({
+        "multiroom": {
+            "mode": "STEREO_PAIR",
+            "stereoPair": {
+                "active": True,
+                "channelFromConfig": "left",
+                "pairDeviceFromConfig": "DEV-XYZ",
+            },
+        },
+        "sbercast": {"enabled": True, "devices": [{"id": "box-1"}, {"id": "tv-2"}]},
+        "deviceGroups": {"soundBar": {"role": "satellite", "master": "box-1"}},
+        "deviceSelector": {
+            "castGroup": [{"id": "a"}],
+            "dsGroup": [],
+            "roomGroup": [{"id": "b"}, {"id": "c"}],
+            "qcGroup": [],
+        },
+    })
+    assert d.multiroom_mode == "STEREO_PAIR"
+    assert d.stereo_pair_active is True
+    assert d.stereo_pair_channel == "left"
+    assert d.stereo_pair_device == "DEV-XYZ"
+    assert d.sbercast_enabled is True
+    assert len(d.sbercast_devices) == 2
+    assert d.soundbar_group == {"role": "satellite", "master": "box-1"}
+    # Только непустые группы селектора попадают в модель.
+    assert set(d.selector_groups) == {"castGroup", "roomGroup"}
+    assert len(d.selector_groups["roomGroup"]) == 2
+
+
+def test_parse_device_state_device_links_empty_like_real_unit():
+    """Реальная форма одиночной колонки: пустые списки, "" каналы, soundBar=null.
+
+    Должна давать «нет связки», а не мусор ("" вместо None, пустые группы).
+    """
+    d = parse_device_state({
+        "multiroom": {
+            "mode": "NONE",
+            "stereoPair": {
+                "active": False,
+                "channelFromConfig": "",
+                "pairDeviceFromConfig": "",
+            },
+        },
+        "sbercast": {"enabled": True, "devices": []},
+        "deviceGroups": {"soundBar": None},
+        "deviceSelector": {"castGroup": [], "dsGroup": [], "roomGroup": [], "qcGroup": []},
+    })
+    assert d.stereo_pair_channel is None  # "" → None, не пустая строка
+    assert d.stereo_pair_device is None
+    assert d.sbercast_devices == []
+    assert d.soundbar_group is None
+    assert d.selector_groups == {}  # пустые группы отфильтрованы
+
+
+def test_link_count_aggregates_all_three_sources():
+    """_link_count = sbercast.devices + группы селектора + саундбар (+1)."""
+    dev = DeviceState(
+        sbercast_devices=[{"id": "a"}, {"id": "b"}],
+        selector_groups={"castGroup": [{"id": "c"}], "roomGroup": [{"id": "d"}]},
+        soundbar_group={"role": "satellite"},
+    )
+    assert _link_count(dev) == 2 + 2 + 1  # 2 cast-устройства + 2 в группах + саундбар
+    assert _link_count(DeviceState()) == 0  # одиночная колонка — ничего не связано
+    assert _link_count(None) is None
+
+
+def test_link_attrs_omits_empty_sources():
+    """Атрибуты содержат только непустые источники; всё пусто → None (не {})."""
+    assert _link_attrs(DeviceState()) is None
+    attrs = _link_attrs(DeviceState(soundbar_group={"master": "box"}))
+    assert attrs == {"soundbar": {"master": "box"}}
+    assert "sbercast_devices" not in attrs  # пустой источник не засоряет атрибуты
 
 
 def test_parse_device_state_active_app_is_the_playing_app():

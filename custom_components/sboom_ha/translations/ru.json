@@ -170,6 +170,9 @@
       "multiroom_mode": {
         "name": "Режим multiroom"
       },
+      "device_links": {
+        "name": "Связанные устройства"
+      },
       "network_type": {
         "name": "Тип подключения"
       },

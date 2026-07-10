@@ -54,6 +54,30 @@ def _dev(c: SboomCoordinator) -> DeviceState | None:
     return c.state.device if c.state else None
 
 
+def _link_count(dev: DeviceState | None) -> int | None:
+    """Сколько устройств связано: sbercast + группы селектора + саундбар."""
+    if dev is None:
+        return None
+    n = len(dev.sbercast_devices) + sum(len(v) for v in dev.selector_groups.values())
+    if dev.soundbar_group:
+        n += 1
+    return n
+
+
+def _link_attrs(dev: DeviceState | None) -> dict[str, Any] | None:
+    """Разбивка связки по источникам; None когда ничего не связано."""
+    if dev is None:
+        return None
+    attrs: dict[str, Any] = {}
+    if dev.sbercast_devices:
+        attrs["sbercast_devices"] = dev.sbercast_devices
+    if dev.selector_groups:
+        attrs["selector_groups"] = dev.selector_groups
+    if dev.soundbar_group:
+        attrs["soundbar"] = dev.soundbar_group
+    return attrs or None
+
+
 SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
     # Яркость LED-дисплея колонки (0-100%).
     SboomSensorSpec(
@@ -125,13 +149,38 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:account-voice",
         value_fn=lambda c: dev.assistant_character if (dev := _dev(c)) else None,
     ),
-    # Режим multiroom (NONE/…).
+    # Режим multiroom (NONE/…). При объединении в стереопару — канал (L/R) и
+    # устройство-партнёр в атрибутах.
     SboomSensorSpec(
         key="multiroom_mode",
         translation_key="multiroom_mode",
         icon="mdi:speaker-multiple",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda c: dev.multiroom_mode if (dev := _dev(c)) else None,
+        attrs_fn=lambda c: (
+            {
+                "stereo_pair_active": dev.stereo_pair_active,
+                "stereo_pair_channel": dev.stereo_pair_channel,
+                "stereo_pair_device": dev.stereo_pair_device,
+            }
+            if (dev := _dev(c))
+            and (dev.stereo_pair_active or dev.stereo_pair_channel or dev.stereo_pair_device)
+            else None
+        ),
+    ),
+    # Межустройственная связка: cast-группы, саундбар, связанные устройства
+    # Sber (SberBox/ТВ/колонки). На одиночной колонке = 0; при объединении
+    # (farfield/multiroom/cast) показывает число связанных устройств, а разбивку
+    # (sbercast/группы селектора/саундбар) — в атрибутах. Diagnostic, выключен
+    # по умолчанию (обычно пусто).
+    SboomSensorSpec(
+        key="device_links",
+        translation_key="device_links",
+        icon="mdi:link-variant",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        value_fn=lambda c: _link_count(_dev(c)),
+        attrs_fn=lambda c: _link_attrs(_dev(c)),
     ),
     # Тип сетевого подключения колонки (WIFI/…).
     SboomSensorSpec(

@@ -52,6 +52,15 @@ class DeviceState:
     sleep_state: str | None = None          # deviceSleep.systemState ("working" = активна)
     stereo_pair_active: bool | None = None  # multiroom.stereoPair.active
     multiroom_mode: str | None = None       # multiroom.mode
+    # Межустройственная связка (farfield/cast/soundbar/стереопара). На одиночной
+    # колонке всё пусто; заполняется при объединении с SberBox/ТВ/другой колонкой
+    # (companion-протокол общий для платформы StarOS).
+    stereo_pair_channel: str | None = None  # multiroom.stereoPair.channelFromConfig (left/right)
+    stereo_pair_device: str | None = None   # multiroom.stereoPair.pairDeviceFromConfig
+    sbercast_enabled: bool | None = None     # sbercast.enabled
+    sbercast_devices: list[Any] = field(default_factory=list)  # sbercast.devices (связанные для каста)
+    soundbar_group: Any = None               # deviceGroups.soundBar (null | связка «саундбар»)
+    selector_groups: dict[str, list] = field(default_factory=dict)  # deviceSelector.*Group (непустые)
     active_app: str | None = None           # background_apps[0].app_info.systemName
     assistant_character: str | None = None  # assistant.character
     is_subscription_device: bool | None = None  # subscrDeviceInfo.isSubscrDevice

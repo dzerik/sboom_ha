@@ -74,7 +74,33 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     multiroom = data.get("multiroom")
     if isinstance(multiroom, dict):
         ds.multiroom_mode = multiroom.get("mode")
-        ds.stereo_pair_active = (multiroom.get("stereoPair") or {}).get("active")
+        sp = multiroom.get("stereoPair")
+        if isinstance(sp, dict):
+            ds.stereo_pair_active = sp.get("active")
+            # channelFromConfig/pairDeviceFromConfig — "" когда не в паре.
+            ds.stereo_pair_channel = sp.get("channelFromConfig") or None
+            ds.stereo_pair_device = sp.get("pairDeviceFromConfig") or None
+
+    # Слой связки устройств (SberCast / device-selector-группы / саундбар).
+    # Пуст на одиночной колонке; наполняется при farfield/cast/группировке.
+    sbercast = data.get("sbercast")
+    if isinstance(sbercast, dict):
+        ds.sbercast_enabled = sbercast.get("enabled")
+        devs = sbercast.get("devices")
+        if isinstance(devs, list):
+            ds.sbercast_devices = devs
+
+    groups = data.get("deviceGroups")
+    if isinstance(groups, dict):
+        ds.soundbar_group = groups.get("soundBar")
+
+    selector = data.get("deviceSelector")
+    if isinstance(selector, dict):
+        ds.selector_groups = {
+            k: v
+            for k in ("castGroup", "dsGroup", "roomGroup", "qcGroup")
+            if isinstance(v := selector.get(k), list) and v
+        }
 
     # active_app — приложение, которое реально играет (state.player.playing).
     # background_apps — самотасующийся z-order стек, поэтому брать [0] нельзя:

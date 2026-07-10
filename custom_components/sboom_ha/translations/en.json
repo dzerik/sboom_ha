@@ -170,6 +170,9 @@
       "multiroom_mode": {
         "name": "Multiroom mode"
       },
+      "device_links": {
+        "name": "Linked devices"
+      },
       "network_type": {
         "name": "Connection type"
       },

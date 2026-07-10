@@ -4,6 +4,14 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.24.0]
+
+### Added
+- **Слой межустройственной связки в GET_STATE.** Раньше парсили только `multiroom.mode`/`stereoPair.active`; теперь читаем весь слой объединения устройств Sber:
+  - Новый диагностический сенсор `sensor.<name>_device_links` (выкл. по умолчанию) — число связанных устройств (SberCast + группы селектора + саундбар), разбивка по источникам в атрибутах. На одиночной колонке `0`; наполняется при объединении с SberBox/ТВ/другой колонкой (companion-протокол общий для платформы StarOS).
+  - Сенсор `multiroom_mode` обогащён атрибутами стереопары: канал (L/R) и устройство-партнёр (`multiroom.stereoPair.channelFromConfig`/`pairDeviceFromConfig`).
+  - Парсинг `sbercast`, `deviceSelector` (cast/ds/room/qc-группы), `deviceGroups.soundBar` — пустые источники отфильтровываются, `""`-каналы нормализуются в `None`.
+
 ## [0.23.2]
 
 ### Changed
