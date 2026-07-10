@@ -214,7 +214,8 @@ async def collect_ws(client: SberSpeakerClient) -> dict:
                 pass
         try:
             dec = _decode(resp)
-            op_map[str(op)] = "tlv:" + ",".join(str(k) for k in sorted(dec))
+            # Поле 3 = код ошибки → error; его отсутствие → успешный ack.
+            op_map[str(op)] = "error" if 3 in dec else "ack"
         except Exception:  # noqa: BLE001
             op_map[str(op)] = f"raw:{len(resp)}b"
     out["op_map"] = op_map
