@@ -59,6 +59,7 @@ class DeviceState:
     timezone_id: str | None = None          # time.timezone_id (напр. "Europe/Moscow")
     device_unixtime: float | None = None    # timesync.unixtime — часы колонки (для диагностики skew)
     age_mode: str | None = None             # user_settings.age_mode (adult/child)
+    reminders: dict[str, Any] = field(default_factory=dict)  # reminders.reminders (сырой блок)
     # location: колонка сама себя позиционирует по Wi-Fi (location.source="wifi").
     latitude: float | None = None           # location.lat
     longitude: float | None = None          # location.lon

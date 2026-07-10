@@ -270,3 +270,33 @@ def test_coordinates_sensor_value_format():
     state.device = DeviceState()
     assert spec.value_fn(coord) is None
     assert spec.attrs_fn(coord) is None
+
+
+def test_parse_device_state_reminders_raw_block():
+    """reminders.reminders сохраняется сырым блоком для календаря."""
+    d = parse_device_state({"reminders": {"reminders": {"time_reminders": {"k": []}}}})
+    assert d.reminders == {"reminders": {"time_reminders": {"k": []}}}
+    assert parse_device_state({}).reminders == {}
+
+
+def test_next_alarm_timer_sensors_from_fixture():
+    """Сенсоры next_alarm/next_timer читают время из dev.alarms/dev.timers."""
+    import json
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from sboom_ha._models import DeviceState
+    from sboom_ha._schedule import next_alarm, next_timer
+
+    from tests._fakes import build_coordinator, make_state
+
+    st = json.loads((Path(__file__).parent / "fixtures" / "alarm_state.json").read_text())
+    state = make_state()
+    state.device = DeviceState(alarms=st["alarm"]["alarms"], timers=st["alarm"]["timers"])
+    coord = build_coordinator(state=state)
+    from datetime import timedelta
+    now = datetime(2026, 7, 13, 3, 0, tzinfo=UTC)  # понедельник 03:00
+    # ближайший будильник — будничный 04:00:40 того же дня
+    assert next_alarm(coord.state.device.alarms, now) == datetime(2026, 7, 13, 4, 0, 40, tzinfo=UTC)
+    # таймер: осталось 6489с от now
+    assert next_timer(coord.state.device.timers, now) == now + timedelta(seconds=6489)

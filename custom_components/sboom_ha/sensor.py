@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -16,6 +16,7 @@ from homeassistant.helpers.event import async_call_later
 
 from ._entity_base import SboomEntity
 from ._models import DeviceState
+from ._schedule import next_alarm, next_timer
 from .coordinator import SboomCoordinator
 from .helpers import lyrics_position
 from .lyrics_client import current_line
@@ -75,6 +76,26 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:timer-outline",
         value_fn=lambda c: dev.timers_count if (dev := _dev(c)) else None,
         attrs_fn=lambda c: {"timers": dev.timers} if (dev := _dev(c)) else None,
+    ),
+    # Время ближайшего срабатывания будильника (timestamp).
+    SboomSensorSpec(
+        key="next_alarm",
+        translation_key="next_alarm",
+        icon="mdi:alarm-check",
+        device_class="timestamp",
+        value_fn=lambda c: (
+            next_alarm(dev.alarms, datetime.now(UTC)) if (dev := _dev(c)) else None
+        ),
+    ),
+    # Время окончания ближайшего таймера (timestamp).
+    SboomSensorSpec(
+        key="next_timer",
+        translation_key="next_timer",
+        icon="mdi:timer-check-outline",
+        device_class="timestamp",
+        value_fn=lambda c: (
+            next_timer(dev.timers, datetime.now(UTC)) if (dev := _dev(c)) else None
+        ),
     ),
     # Активное приложение колонки (music/bluetooth/news/…).
     SboomSensorSpec(

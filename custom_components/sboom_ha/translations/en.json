@@ -190,6 +190,12 @@
       },
       "coordinates": {
         "name": "Coordinates"
+      },
+      "next_alarm": {
+        "name": "Next alarm"
+      },
+      "next_timer": {
+        "name": "Next timer"
       }
     },
     "binary_sensor": {
@@ -232,6 +238,11 @@
     "device_tracker": {
       "location": {
         "name": "Location"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
       }
     }
   },

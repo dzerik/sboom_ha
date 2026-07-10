@@ -130,6 +130,10 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     if isinstance(settings, dict):
         ds.age_mode = settings.get("age_mode")
 
+    reminders = data.get("reminders")
+    if isinstance(reminders, dict):
+        ds.reminders = reminders
+
     location = data.get("location")
     if isinstance(location, dict):
         lat, lon = location.get("lat"), location.get("lon")

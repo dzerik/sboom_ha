@@ -670,6 +670,7 @@ class Platform(str, Enum):
     BINARY_SENSOR = "binary_sensor"
     CAMERA = "camera"
     DEVICE_TRACKER = "device_tracker"
+    CALENDAR = "calendar"
 
 
 class EntityCategory(str, Enum):
@@ -736,6 +737,19 @@ class Camera:
 
 class SensorEntity:
     pass
+
+
+class CalendarEntity:
+    pass
+
+
+@dataclass
+class CalendarEvent:
+    start: Any = None
+    end: Any = None
+    summary: str = ""
+    description: str | None = None
+    uid: str | None = None
 
 
 class TrackerEntity:
@@ -909,6 +923,11 @@ def install_stubs() -> None:
         "homeassistant.components.device_tracker",
         TrackerEntity=TrackerEntity,
         SourceType=_SourceType,
+    )
+    _make_module(
+        "homeassistant.components.calendar",
+        CalendarEntity=CalendarEntity,
+        CalendarEvent=CalendarEvent,
     )
     # ── device automation (trigger/action) ──
     import voluptuous as _vol

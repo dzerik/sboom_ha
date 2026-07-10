@@ -190,6 +190,12 @@
       },
       "coordinates": {
         "name": "Координаты"
+      },
+      "next_alarm": {
+        "name": "Следующий будильник"
+      },
+      "next_timer": {
+        "name": "Следующий таймер"
       }
     },
     "binary_sensor": {
@@ -232,6 +238,11 @@
     "device_tracker": {
       "location": {
         "name": "Местоположение"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Расписание"
       }
     }
   },
