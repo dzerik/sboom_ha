@@ -44,6 +44,9 @@ class SboomSensorSpec:
     device_class: Any = None  # SensorDeviceClass; аналогично
     entity_category: EntityCategory | None = None
     enabled_default: bool = True
+    # Для «железных» сенсоров (libiio/Zigbee): создавать, только если модель
+    # реально умеет. None = сенсор доступен всегда (обычные подсистемы GET_STATE).
+    available_fn: Callable[[SboomCoordinator], bool] | None = None
 
 
 def _dev(c: SboomCoordinator) -> DeviceState | None:
@@ -247,17 +250,83 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
 )
 
 
+# «Железные» сенсоры — создаются только на моделях, где probe нашёл датчик
+# (см. coordinator._probe_hw_capabilities). У большинства колонок Sber их нет.
+HW_SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
+    # Освещённость в комнате (датчик HX3203 через libiio), люксы.
+    SboomSensorSpec(
+        key="illuminance",
+        translation_key="illuminance",
+        native_unit="lx",
+        state_class="measurement",
+        device_class="illuminance",
+        available_fn=lambda c: c.iio_cap.has_illuminance,
+        value_fn=lambda c: c.iio_reading.illuminance_lux,
+    ),
+    # Температура SoC колонки (hwmon через libiio), °C. Diagnostic.
+    SboomSensorSpec(
+        key="soc_temperature",
+        translation_key="soc_temperature",
+        native_unit="°C",
+        state_class="measurement",
+        device_class="temperature",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        available_fn=lambda c: c.iio_cap.has_thermal,
+        value_fn=lambda c: c.iio_reading.soc_temp_c,
+    ),
+    # Инвентарь Zigbee-устройств колонки (debug-CLI). State = количество,
+    # список (модель/производитель/RSSI/питание) — в атрибутах. Diagnostic.
+    # Только чтение инвентаря: состояние/управление устройствами CLI не даёт.
+    SboomSensorSpec(
+        key="zigbee_inventory",
+        translation_key="zigbee_inventory",
+        icon="mdi:zigbee",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        available_fn=lambda c: c.has_zigbee_cli,
+        value_fn=lambda c: len(c.zigbee_devices),
+        attrs_fn=lambda c: {
+            "devices": [
+                {
+                    "ieee": d.ieee, "model": d.model, "manufacturer": d.manufacturer,
+                    "power_source": d.power_source, "rssi": d.rssi, "state": d.state,
+                }
+                for d in c.zigbee_devices
+            ]
+        },
+    ),
+    # Инвентарь Matter-устройств колонки (debug-CLI). State = количество;
+    # сырой вывод — в атрибуте raw (формат строки устройства подтвердится с
+    # реальным Matter-устройством). В отличие от Zigbee, Matter даёт и
+    # чтение (attr), и управление (send_cmd) — но это отдельная фича. Diagnostic.
+    SboomSensorSpec(
+        key="matter_inventory",
+        translation_key="matter_inventory",
+        icon="mdi:home-automation",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        available_fn=lambda c: c.has_matter_cli,
+        value_fn=lambda c: c.matter_count,
+        attrs_fn=lambda c: {"raw": c.matter_raw} if c.matter_raw else None,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SboomCoordinator = entry.runtime_data
-    async_add_entities([
+    entities: list[SensorEntity] = [
         SboomLyricsCurrentLineSensor(coordinator, entry),
         SboomLyricsFullSensor(coordinator, entry),
         *(SboomDeviceSensor(coordinator, entry, spec) for spec in SENSOR_SPECS),
-    ])
+    ]
+    # «Железные» сенсоры — только если модель реально их умеет (определено
+    # при старте через probe). У большинства колонок Sber их НЕТ.
+    for spec in HW_SENSOR_SPECS:
+        if spec.available_fn(coordinator):
+            entities.append(SboomDeviceSensor(coordinator, entry, spec))
+    async_add_entities(entities)
 
 
 class SboomDeviceSensor(SboomEntity, SensorEntity):

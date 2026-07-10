@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
+from .cli4242 import Cli4242Client, ZigbeeDevice
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
@@ -45,6 +46,7 @@ from .const import (
     RECONNECT_BACKOFF_SEC,
     STABLE_SESSION_SEC,
 )
+from .iio_client import IioCapability, IioClient, IioReading
 from .lyrics_client import Lyrics
 from .lyrics_manager import LyricsManager
 
@@ -113,6 +115,21 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
         self._stopping = False
+
+        # Аппаратные датчики (libiio) и Zigbee-инвентарь (debug-CLI) — есть
+        # только у некоторых моделей (R2). Capability определяется при старте;
+        # если недоступно — соответствующие сенсоры не создаются.
+        host = entry.data[CONF_HOST]
+        self._iio_client = IioClient(host)
+        self._cli = Cli4242Client(host)
+        self.iio_cap: IioCapability = IioCapability()
+        self.has_zigbee_cli: bool = False
+        self.has_matter_cli: bool = False
+        self.iio_reading: IioReading = IioReading()
+        self.zigbee_devices: list[ZigbeeDevice] = []
+        self.matter_count: int = 0
+        self.matter_raw: str = ""
+        self._hw_poll_tick = 0
         # Подряд идущие полностью неудачные poll-циклы при живом на вид сокете —
         # страховка от half-open, который не поймал транспортный WS ping.
         self._poll_failures = 0
@@ -152,9 +169,54 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryNotReady(
                 f"колонка {self.client.host} недоступна: {exc}"
             ) from exc
+        # Определяем аппаратные возможности колонки (libiio, Zigbee-CLI).
+        # Закрытый порт → мгновенный refused, не тормозит setup; probe'ы
+        # параллельны. Сбой любого — просто «нет capability».
+        await self._probe_hw_capabilities()
+
         self._supervisor_task = self.hass.async_create_background_task(
             self._supervisor(), name=f"{DOMAIN}-supervisor"
         )
+
+    async def _probe_hw_capabilities(self) -> None:
+        """Один раз при старте: есть ли у этой модели libiio-датчики и
+        Zigbee-CLI. Определяет, какие «железные» сенсоры будут созданы."""
+        try:
+            self.iio_cap, self.has_zigbee_cli, self.has_matter_cli = await asyncio.gather(
+                self._iio_client.async_probe(),
+                self._cli.async_probe(),
+                self._cli.async_matter_probe(),
+            )
+        except Exception as exc:
+            _LOGGER.debug("hw capability probe failed: %s", exc)
+            return
+        _LOGGER.debug(
+            "hw capabilities: illuminance=%s thermal=%s zigbee_cli=%s matter_cli=%s",
+            self.iio_cap.has_illuminance, self.iio_cap.has_thermal,
+            self.has_zigbee_cli, self.has_matter_cli,
+        )
+        if self.iio_cap.any:
+            self.iio_reading = await self._iio_client.async_read(self.iio_cap)
+        if self.has_zigbee_cli:
+            self.zigbee_devices = await self._cli.async_list_devices() or []
+        if self.has_matter_cli:
+            await self._poll_matter()
+
+    async def _poll_hw(self) -> None:
+        """Опрос аппаратных датчиков/Zigbee. libiio — каждый тик (дёшево),
+        Zigbee-инвентарь — реже (открывает CLI-сессию, меняется медленно)."""
+        if self.iio_cap.any:
+            self.iio_reading = await self._iio_client.async_read(self.iio_cap)
+        if self.has_zigbee_cli and self._hw_poll_tick % 20 == 0:
+            self.zigbee_devices = await self._cli.async_list_devices() or []
+        if self.has_matter_cli and self._hw_poll_tick % 20 == 0:
+            await self._poll_matter()
+        self._hw_poll_tick += 1
+
+    async def _poll_matter(self) -> None:
+        res = await self._cli.async_matter_list()
+        if res is not None:
+            self.matter_count, self.matter_raw = res
 
     async def _connect_and_sync(self) -> None:
         """Один connect + listener + стартовый sync. Бросает исключение при неудаче.
@@ -368,6 +430,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.paired_bt = await self.client.get_paired_bt_devices()
         except Exception as exc:
             _LOGGER.debug("get_paired_bt_devices failed: %s", exc)
+
+        # Аппаратные датчики / Zigbee-инвентарь (только если модель умеет).
+        if self.iio_cap.any or self.has_zigbee_cli or self.has_matter_cli:
+            try:
+                await self._poll_hw()
+            except Exception as exc:
+                _LOGGER.debug("hw poll failed: %s", exc)
 
         # Страховка от half-open: сокет выглядит живым, но все запросы
         # таймаутят. N подряд полностью неудачных циклов → принудительный
