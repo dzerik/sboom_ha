@@ -74,8 +74,9 @@ class SboomLyricsCamera(SboomEntity, Camera):
         Camera.__init__(self)
         self._attr_unique_id = f"{self._device_unique_prefix}_lyrics_camera"
 
-        # Cache: track_id -> raw cover bytes (для повторного использования при отрисовке lyrics)
-        self._cover_cache_track: str | None = None
+        # Cache: cover URL -> raw bytes. Ключ по URL, а не track_id: у BT/радио
+        # track_id нет (None), и кэш по нему путал бы все некаталожные треки.
+        self._cover_cache_url: str | None = None
         self._cover_raw: bytes | None = None
         # Cache: track_id -> готовый idle-JPEG (когда lyrics нет)
         self._idle_jpeg_track: str | None = None
@@ -253,24 +254,22 @@ class SboomLyricsCamera(SboomEntity, Camera):
         )
 
     async def _fetch_cover_raw(self, track) -> bytes | None:
-        if self._cover_cache_track == track.track_id and self._cover_raw is not None:
-            return self._cover_raw
-        url = cover_url(track)
+        # Каталог Zvuk → CDN по release_id; BT/радио → найденная по title+artist.
+        url = cover_url(track) or self.coordinator.current_cover()
+        if self._cover_cache_url == url:
+            return self._cover_raw  # тот же URL (в т.ч. оба None) — из кэша
+        self._cover_cache_url = url
         if not url:
-            self._cover_cache_track = track.track_id
             self._cover_raw = None
             return None
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with self.coordinator.http_session.get(url, timeout=timeout) as r:
                 if r.status == 200:
-                    raw = await r.read()
-                    self._cover_cache_track = track.track_id
-                    self._cover_raw = raw
-                    return raw
+                    self._cover_raw = await r.read()
+                    return self._cover_raw
         except (TimeoutError, aiohttp.ClientError) as exc:
             _LOGGER.debug("cover fetch failed: %s", exc)
-        self._cover_cache_track = track.track_id
         self._cover_raw = None
         return None
 

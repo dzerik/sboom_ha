@@ -48,6 +48,7 @@ from .const import (
     RECONNECT_BACKOFF_SEC,
     STABLE_SESSION_SEC,
 )
+from .cover_manager import CoverManager
 from .iio_client import IioCapability, IioClient, IioReading
 from .lyrics_client import Lyrics
 from .lyrics_manager import LyricsManager
@@ -143,6 +144,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             enabled=self._lyrics_enabled,
             netease_fallback=self._lyrics_netease,
             on_update=self.async_update_listeners,
+        )
+        # Обложка для BT/радио (нет каталожного id) — по title+artist из iTunes/Deezer.
+        self.cover = CoverManager(
+            hass, entry, self._http, on_update=self.async_update_listeners,
         )
 
     @property
@@ -325,8 +330,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Lyrics для активного трека (или None если ещё не загружено / не нашлось)."""
         return self.lyrics.current_for(self.track)
 
+    def current_cover(self) -> str | None:
+        """URL обложки для BT/радио (по title+artist), либо None. Каталог — cover_url()."""
+        return self.cover.current_for(self.track)
+
     def _maybe_fetch_lyrics(self) -> None:
         self.lyrics.maybe_fetch(self.track)
+        self.cover.maybe_fetch(self.track)
 
     # ─────────────────────── optimistic updates ───────────────────────
 

@@ -148,7 +148,11 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
 
     @property
     def media_image_url(self) -> str | None:
-        return cover_url(self.coordinator.track) if self.coordinator.track else None
+        track = self.coordinator.track
+        if not track:
+            return None
+        # Каталог Zvuk → CDN по release_id; BT/радио → найденная по title+artist.
+        return cover_url(track) or self.coordinator.current_cover()
 
     @property
     def media_image_remotely_accessible(self) -> bool:
