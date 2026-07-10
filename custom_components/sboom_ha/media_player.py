@@ -97,6 +97,11 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
         return self.coordinator.track.track_id if self.coordinator.track else None
 
     @property
+    def media_channel(self) -> str | None:
+        """Радиостанция (штатное поле HA для радио/ТВ-каналов)."""
+        return self.coordinator.track.station_name if self.coordinator.track else None
+
+    @property
     def media_content_type(self) -> str | None:
         # Без этого HA в more-info не выводит media_artist и фолбэкает на app_name.
         return MediaType.MUSIC if self.coordinator.track else None

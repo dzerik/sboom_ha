@@ -167,6 +167,9 @@
       "assistant_character": {
         "name": "Персона ассистента"
       },
+      "playback_mode": {
+        "name": "Режим воспроизведения"
+      },
       "multiroom_mode": {
         "name": "Режим multiroom"
       },

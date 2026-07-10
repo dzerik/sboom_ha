@@ -194,6 +194,85 @@ def parse_device_state(data: dict[str, Any]) -> DeviceState:
     return ds
 
 
+# Медиа-аппы, чей player несёт now-playing (в порядке приоритета).
+_MEDIA_APPS = ("bluetooth_media_control", "music")
+
+
+def _names(value: Any) -> list[str]:
+    """artists/releases: массив [{name}] (GET_STATE/music) ИЛИ строка (BT-формат)."""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        return [x.get("name") for x in value if isinstance(x, dict) and x.get("name")]
+    return []
+
+
+def track_from_state(data: dict[str, Any]) -> TrackInfo | None:
+    """Now-playing из GET_STATE — когда get_metadata пуст (радио/Bluetooth: нет trackId).
+
+    Скан background_apps по медиа-аппам; берём app с непустым info
+    (title/trackId/stationName). Предпочитаем playing=true, но не игнорируем
+    паузу (радио на паузе: title="", но stationName остаётся). Прочие аппы
+    со своим player (morning_show и т.п.) не имеют этих полей — не мешают.
+    """
+    apps = data.get("background_apps")
+    if not isinstance(apps, list):
+        return None
+
+    candidate: tuple[str, dict, dict] | None = None
+    for app in apps:
+        if not isinstance(app, dict):
+            continue
+        name = (app.get("app_info") or {}).get("systemName")
+        if name not in _MEDIA_APPS:
+            continue
+        player = (app.get("state") or {}).get("player")
+        if not isinstance(player, dict):
+            continue
+        info = player.get("info")
+        if not isinstance(info, dict):
+            continue
+        if not (info.get("title") or info.get("trackId") or info.get("stationName")):
+            continue  # нет чем идентифицировать медиа-контекст
+        if player.get("playing"):
+            candidate = (name, player, info)
+            break  # играющий — безусловный приоритет
+        if candidate is None:
+            candidate = (name, player, info)  # запомним паузу, вдруг играющих нет
+
+    if candidate is None:
+        return None
+    name, player, info = candidate
+
+    ti = TrackInfo(raw=info)
+    ti.title = info.get("title") or None
+    ti.artists = _names(info.get("artists"))
+    albums = _names(info.get("releases"))
+    ti.album = albums[0] if albums else None
+    ti.playing = bool(player.get("playing"))
+    ti.station_name = info.get("stationName") or None
+    ti.provider = info.get("provider")
+    tid = info.get("trackId")
+    ti.track_id = str(tid) if tid else None
+    ti.playlist_title = info.get("playlistTitle") or None
+    ti.playlist_type = info.get("playlistType")
+
+    dur = player.get("duration") or 0
+    ti.duration_sec = int(dur) if dur else None  # 0 (радио) → None: прогресс скрыт
+    pos = player.get("position")
+    if isinstance(pos, (int, float)):
+        ti.position_sec = int(pos)
+
+    # media_source: BT по app/provider, радио по mode/station, иначе из info.
+    if name == "bluetooth_media_control" or ti.provider == "bluetooth":
+        ti.media_source = "BLUETOOTH"
+    elif player.get("mode") == "radio" or ti.station_name:
+        ti.media_source = "RADIO"
+    else:
+        ti.media_source = info.get("mediaSource")
+    return ti
+
+
 def parse_state(raw: bytes) -> SpeakerState | None:
     """Парсит GET_STATE: volume/muted + подсистемы устройства (.device).
 

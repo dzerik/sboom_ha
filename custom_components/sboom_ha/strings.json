@@ -167,6 +167,9 @@
       "assistant_character": {
         "name": "Assistant character"
       },
+      "playback_mode": {
+        "name": "Playback mode"
+      },
       "multiroom_mode": {
         "name": "Multiroom mode"
       },

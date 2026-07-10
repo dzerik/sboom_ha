@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -16,6 +17,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from ._parsers import track_from_state
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
 from .cli4242 import Cli4242Client, ZigbeeDevice
 from .const import (
@@ -398,6 +400,16 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             track.received_ts = time.time()
         return track
 
+    def _track_from_current_state(self) -> TrackInfo | None:
+        """Now-playing из последнего GET_STATE (радио/Bluetooth — без trackId)."""
+        if not self.state or not self.state.raw_state_json:
+            return None
+        try:
+            data = json.loads(self.state.raw_state_json)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return track_from_state(data)
+
     async def _refresh_state_and_track(self, *, notify: bool = True) -> None:
         prev_track = self.track
         prev_state = self.state
@@ -425,7 +437,18 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.track.duration_sec, self.track.provider,
                 )
             else:
-                _LOGGER.debug("get_metadata returned None — парсер не нашёл trackId")
+                # get_metadata пуст (радио/Bluetooth — нет trackId). Now-playing
+                # для них живёт в GET_STATE (music/bluetooth_media_control app).
+                self.track = self._stamp_track(self._track_from_current_state())
+                if self.track:
+                    self._maybe_fetch_lyrics()
+                    _LOGGER.debug(
+                        "track_from_state -> title=%r station=%r source=%s playing=%s",
+                        self.track.title, self.track.station_name,
+                        self.track.media_source, self.track.playing,
+                    )
+                else:
+                    _LOGGER.debug("get_metadata и GET_STATE без now-playing")
         except Exception as exc:
             _LOGGER.debug("get_metadata failed: %s", exc)
         try:

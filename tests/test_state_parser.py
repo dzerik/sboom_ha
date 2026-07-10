@@ -1,9 +1,11 @@
 """Тесты парсера подсистем GET_STATE (DeviceState) и обновлённого parse_state."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from sboom_ha._models import DeviceState
-from sboom_ha._parsers import parse_device_state, parse_state
-from sboom_ha.sensor import _link_attrs, _link_count
+from sboom_ha._parsers import _names, parse_device_state, parse_state, track_from_state
+from sboom_ha.sensor import _link_attrs, _link_count, _playback_mode
 
 # ─────────────────────── parse_device_state ───────────────────────
 
@@ -416,3 +418,114 @@ def test_parse_device_state_empty_current_app():
     d = parse_device_state({"current_app": {"app_info": {}, "state": {}}})
     assert d.foreground_app is None
     assert parse_device_state({"device_segments": []}).firmware_channel is None
+
+
+# ─────────────────── track_from_state (радио / Bluetooth fallback) ───────────────────
+
+def _app(name, player=None):
+    a = {"app_info": {"systemName": name}, "state": {}}
+    if player is not None:
+        a["state"]["player"] = player
+    return a
+
+
+def _music_radio(playing=True, title="Friday I'm In Love"):
+    return _app("music", {
+        "playing": playing, "mode": "radio", "duration": 0,
+        "position": 183 if playing else None,
+        "info": {
+            "id": "22", "stationName": "MAXIMUM - Россия",
+            "title": title, "artists": [{"name": "The Cure"}] if title else [],
+        },
+    })
+
+
+def test_track_from_state_radio_playing():
+    """Радио: станция+песня+исполнитель, source=RADIO, duration→None, без trackId."""
+    t = track_from_state({"background_apps": [_app("morning_show", {"playing": False}), _music_radio()]})
+    assert t is not None
+    assert t.title == "Friday I'm In Love"
+    assert t.artists == ["The Cure"]
+    assert t.station_name == "MAXIMUM - Россия"
+    assert t.media_source == "RADIO"
+    assert t.playing is True
+    assert t.duration_sec is None   # 0 → None: прогресс-бар скрыт
+    assert t.track_id is None
+
+
+def test_track_from_state_radio_paused_keeps_station():
+    """Радио на паузе: title="" → None, но станция остаётся, playing=False."""
+    t = track_from_state({"background_apps": [_music_radio(playing=False, title="")]})
+    assert t is not None
+    assert t.playing is False       # → media_player PAUSED, не IDLE
+    assert t.station_name == "MAXIMUM - Россия"
+    assert t.title is None          # пустой title не течёт как ""
+    assert t.media_source == "RADIO"
+
+
+def test_track_from_state_bluetooth_other_app():
+    """Bluetooth: метадата в bluetooth_media_control (не music), source=BLUETOOTH."""
+    t = track_from_state({"background_apps": [_app("bluetooth_media_control", {
+        "playing": True, "duration": 294, "position": 256,
+        "info": {
+            "title": "In the House - In a Heartbeat", "provider": "bluetooth",
+            "artists": [{"name": "DJEM"}],
+            "releases": [{"name": "In the House - In a Heartbeat"}],
+        },
+    })]})
+    assert t is not None
+    assert t.title == "In the House - In a Heartbeat"
+    assert t.artists == ["DJEM"]
+    assert t.album == "In the House - In a Heartbeat"
+    assert t.media_source == "BLUETOOTH"
+    assert t.duration_sec == 294
+    assert t.track_id is None
+
+
+def test_track_from_state_ignores_non_media_apps():
+    """morning_show со своим player (без title/trackId/station) не перебивает music."""
+    t = track_from_state({"background_apps": [
+        _app("morning_show", {"playing": True, "info": {"showStepId": "x"}}),
+        _music_radio(playing=True),
+    ]})
+    assert t is not None
+    assert t.station_name == "MAXIMUM - Россия"  # выбран music, не morning_show
+
+
+def test_track_from_state_prefers_playing_over_paused():
+    """Если один медиа-app на паузе, а другой играет — берём играющий."""
+    paused_bt = _app("bluetooth_media_control", {"playing": False, "info": {"title": "old"}})
+    t = track_from_state({"background_apps": [paused_bt, _music_radio(playing=True)]})
+    assert t.station_name == "MAXIMUM - Россия"  # играющее радио, не пауза BT
+    assert t.playing is True
+
+
+def test_track_from_state_none_when_nothing_playable():
+    """Нет медиа-контекста (пустой info / только служебные аппы) → None."""
+    assert track_from_state({"background_apps": []}) is None
+    assert track_from_state({"background_apps": [_app("music", {"playing": False, "info": {}})]}) is None
+    assert track_from_state({}) is None
+
+
+def test_names_handles_array_and_string():
+    """artists/releases: массив [{name}] (state) и строка (BT get_metadata-формат)."""
+    assert _names([{"name": "A"}, {"name": "B"}]) == ["A", "B"]
+    assert _names("DJEM") == ["DJEM"]     # BT-формат: строка
+    assert _names("") == []
+    assert _names(None) == []
+
+
+# ─────────────────── _playback_mode (сенсор режима) ───────────────────
+
+def _coord(track):
+    return SimpleNamespace(track=track)
+
+
+def test_playback_mode_derivation():
+    """music/wave/podcast/radio/bluetooth из media_source + playlistType."""
+    assert _playback_mode(_coord(None)) is None
+    assert _playback_mode(_coord(SimpleNamespace(media_source="BLUETOOTH", playlist_type=None))) == "bluetooth"
+    assert _playback_mode(_coord(SimpleNamespace(media_source="RADIO", playlist_type=None))) == "radio"
+    assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="podcast"))) == "podcast"
+    assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="endless"))) == "wave"
+    assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="album"))) == "music"

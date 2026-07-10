@@ -4,6 +4,17 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.25.0]
+
+### Fixed
+- **Радио и Bluetooth больше не показываются как IDLE с пустой карточкой.** У радио и BT-аудио нет `trackId`, поэтому `get_metadata` (op 10) для них пуст → трек был `None` → media_player висел в `IDLE`, хотя звук идёт. Теперь now-playing для них добирается из `GET_STATE`:
+  - **Радио**: станция → `media_channel` (штатное поле HA), текущая песня → `media_title`, исполнитель → `media_artist`. На паузе остаётся станция, state = `PAUSED` (не `IDLE`).
+  - **Bluetooth** (app `bluetooth_media_control`, а не `music`): title/исполнитель/альбом из `player.info`; `media_source="BLUETOOTH"`.
+  - Прогресс-бар скрывается у радио (`duration=0`→`None`); обычная музыка/волна/подкаст (у них есть `trackId`) не затронуты.
+
+### Added
+- **Сенсор `sensor.<name>_playback_mode`** — тип воспроизведения: `music` / `wave` / `podcast` / `radio` / `bluetooth`. Единого поля-режима у колонки нет (radio по `mode`, wave/podcast по `playlistType`, bluetooth по источнику) — сенсор их сводит и работает даже когда media_player пуст.
+
 ## [0.24.0]
 
 ### Added

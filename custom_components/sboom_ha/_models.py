@@ -17,7 +17,8 @@ class TrackInfo:
     playlist_type: str | None = None      # playlistType: endless (волна) / album / user / …
     playlist_id: str | None = None        # playlistId
     playlist_liked: bool | None = None    # playlistLike — лайкнут ли плейлист/станция
-    media_source: str | None = None       # mediaSource: MUSIC / RADIO / PODCAST / …
+    media_source: str | None = None       # mediaSource: MUSIC / RADIO / PODCAST / BLUETOOTH / …
+    station_name: str | None = None        # info.stationName (радио) → HA media_channel
     child_mode: bool | None = None        # childMode — детский режим
     buffering: bool | None = None         # playingPending — идёт загрузка/буферизация
     provider: str | None = None

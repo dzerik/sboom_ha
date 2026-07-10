@@ -64,6 +64,28 @@ def _link_count(dev: DeviceState | None) -> int | None:
     return n
 
 
+def _playback_mode(c: SboomCoordinator) -> str | None:
+    """Тип текущего воспроизведения: music/wave/podcast/radio/bluetooth.
+
+    Единого поля-режима у колонки нет: radio виден по media_source, bluetooth —
+    по media_source/app, а wave/podcast — по playlistType. Собираем из трека
+    (который для радио/BT добирается из GET_STATE), None когда ничего не играет.
+    """
+    t = c.track
+    if t is None:
+        return None
+    if t.media_source == "BLUETOOTH":
+        return "bluetooth"
+    if t.media_source == "RADIO":
+        return "radio"
+    pt = (t.playlist_type or "").lower()
+    if pt == "podcast":
+        return "podcast"
+    if pt == "endless":
+        return "wave"
+    return "music"
+
+
 def _link_attrs(dev: DeviceState | None) -> dict[str, Any] | None:
     """Разбивка связки по источникам; None когда ничего не связано."""
     if dev is None:
@@ -141,6 +163,15 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="foreground_app",
         icon="mdi:cellphone-screenshot",
         value_fn=lambda c: dev.foreground_app if (dev := _dev(c)) else None,
+    ),
+    # Тип воспроизведения: music/wave/podcast/radio/bluetooth. В отличие от
+    # active_app (=music для всего аудио), различает радио, BT и подкаст —
+    # работает даже когда media_player пуст (радио/BT без trackId).
+    SboomSensorSpec(
+        key="playback_mode",
+        translation_key="playback_mode",
+        icon="mdi:playlist-play",
+        value_fn=_playback_mode,
     ),
     # Персона голосового ассистента (afina/joy/sber).
     SboomSensorSpec(
