@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.23.1]
+
+### Changed
+- Документация синхронизирована под аппаратные возможности: карточка HACS `info.md` (датчики платы, инвентарь Zigbee/Matter) и дерево файлов README (`iio_client.py`, `cli4242.py`).
+
 ## [0.23.0]
 
 ### Added

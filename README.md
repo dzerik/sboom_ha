@@ -410,6 +410,8 @@ custom_components/sboom_ha/
 │
 │   # Lyrics и рендер
 ├── lyrics_client.py       — цепочка lyrics-источников (Lrclib → NetEase) с retry
+├── iio_client.py          — libiio (:30431): датчики платы (освещённость, темп SoC)
+├── cli4242.py             — debug-CLI (:4242): инвентарь Zigbee/Matter
 ├── image_render.py        — PIL-рендер lyrics-кадров + idle-обложки
 │
 │   # Ассеты
