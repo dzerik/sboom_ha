@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._entity_base import SboomEntity
 from .const import LYRICS_FRAME_INTERVAL_SEC
 from .coordinator import SboomCoordinator
-from .helpers import cover_url, lyrics_position, track_position
+from .helpers import cover_url, lyrics_position, source_label, track_position
 from .image_render import (
     draw_blank,
     draw_cover_yandex,
@@ -118,6 +118,7 @@ class SboomLyricsCamera(SboomEntity, Camera):
             cover_raw, cur, nxt, track.title, artist,
             progress, pos, duration,
             frac if track.playing else None,
+            source_label(track),
         )
 
     # ─────────── MJPEG stream (для отправки на ТВ) ───────────
@@ -207,6 +208,7 @@ class SboomLyricsCamera(SboomEntity, Camera):
                     cover_raw, cur, nxt, track.title, artist,
                     progress, pos, duration,
                     frac if playing else None,
+                    source_label(track),
                 )
                 await _write_jpeg(response, jpeg)
                 last_key = key
@@ -247,6 +249,7 @@ class SboomLyricsCamera(SboomEntity, Camera):
         progress = (pos / duration) if (pos is not None and duration and duration > 0) else None
         return await asyncio.to_thread(
             draw_cover_yandex, cover_raw, track.title, artist, progress, pos, duration,
+            source_label(track),
         )
 
     async def _fetch_cover_raw(self, track) -> bytes | None:

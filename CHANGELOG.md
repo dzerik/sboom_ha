@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.21.0]
+
+### Added
+- **Плашка источника на караоке-кадре** — вверху приглушённым шрифтом показывается контекст «Персональная волна · Sber Звук» (название станции/плейлиста + провайдер) из тех же metadata-полей, что оживили Now Playing. И в караоке-режиме, и в idle. `helpers.provider_label`/`source_label` вынесены из media_player (дедупликация `app_name`).
+
 ## [0.20.0]
 
 ### Added

@@ -18,7 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._entity_base import SboomEntity
 from .const import REPEAT_TO_CANONICAL
 from .coordinator import SboomCoordinator
-from .helpers import cover_url
+from .helpers import cover_url, provider_label
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,15 +127,7 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
 
     @property
     def app_name(self) -> str | None:
-        if not self.coordinator.track or not self.coordinator.track.provider:
-            return None
-        # делаем человекочитаемые названия для известных провайдеров
-        return {
-            "zvuk":     "Sber Звук",
-            "salute":   "Салют",
-            "youtube":  "YouTube",
-            "spotify":  "Spotify",
-        }.get(self.coordinator.track.provider, self.coordinator.track.provider)
+        return provider_label(self.coordinator.track.provider) if self.coordinator.track else None
 
     @property
     def shuffle(self) -> bool | None:

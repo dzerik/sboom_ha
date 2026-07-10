@@ -267,14 +267,20 @@ def draw_lyrics_with_cover(
     position_sec: float | None = None,
     duration_sec: float | None = None,
     line_progress: float | None = None,
+    source: str | None = None,
 ) -> bytes:
     """Яндекс-стиль: blur-обложка + lyrics поверх + футер с title/artist + progress.
 
     line_progress (0..1) — доля пропетости текущей строки: включает
     караоке-заливку (см. _draw_text_karaoke). None — статичный белый текст.
+    source — плашка контекста вверху («Персональная волна · Sber Звук»).
     """
     canvas = _make_blur_bg(cover)
     ctx = ImageDraw.Draw(canvas)
+
+    # Плашка источника вверху по центру (приглушённая, малым шрифтом).
+    if source:
+        _draw_text(ctx, source, (0, 24, WIDTH, 40), "mt", (170, 170, 175), 28, line_width=60)
 
     # Lyrics верх — две строки в верхних 2/3 экрана.
     if current:
@@ -323,6 +329,7 @@ def draw_cover_yandex(
     progress: float | None = None,
     position_sec: float | None = None,
     duration_sec: float | None = None,
+    source: str | None = None,
 ) -> bytes:
     """Idle-режим (lyrics нет): blur-фон + большая обложка по центру + подписи."""
     canvas = _make_blur_bg(cover)
@@ -335,6 +342,8 @@ def draw_cover_yandex(
         except Exception:
             pass
     ctx = ImageDraw.Draw(canvas)
+    if source:
+        _draw_text(ctx, source, (0, 24, WIDTH, 40), "mt", (170, 170, 175), 28, line_width=60)
     if title:
         _draw_text(ctx, title, (0, HEIGHT - 165, WIDTH, 60), "mb", "white", 50, 35)
     if artist:

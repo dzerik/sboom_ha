@@ -283,3 +283,35 @@ def test_karaoke_partial_line_has_both_colors():
     # Одна строка: y0 = 120 + (240-90)//2 = 195; полоса 195..285
     assert _accent_present(img, 195, 285), "пропетая часть должна быть акцентной"
     assert _white_present(img, 195, 285), "непропетая часть должна остаться белой"
+
+
+def test_source_label_helper():
+    """helpers.source_label собирает «Плейлист · Провайдер», опуская пустое."""
+    from types import SimpleNamespace
+
+    from sboom_ha.helpers import provider_label, source_label
+    assert provider_label("zvuk") == "Sber Звук"
+    assert provider_label("unknown_x") == "unknown_x"
+    assert provider_label(None) is None
+    t = SimpleNamespace(playlist_title="Персональная волна", provider="zvuk")
+    assert source_label(t) == "Персональная волна · Sber Звук"
+    assert source_label(SimpleNamespace(playlist_title=None, provider="zvuk")) == "Sber Звук"
+    assert source_label(SimpleNamespace(playlist_title=None, provider=None)) is None
+    assert source_label(None) is None
+
+
+def test_karaoke_frame_renders_source_label():
+    """Плашка источника реально появляется на кадре: кадр с source отличается
+    байтами от кадра без него (текст нарисован в верхней полосе)."""
+    import io
+
+    from PIL import Image
+    from sboom_ha.image_render import draw_lyrics_with_cover
+
+    base = draw_lyrics_with_cover(None, "строка", None, "T", "A")
+    withsrc = draw_lyrics_with_cover(None, "строка", None, "T", "A", source="Волна · Sber Звук")
+    assert base != withsrc
+    # в верхней полосе (плашка ~y=24..64) появляются светлые пиксели текста
+    img = Image.open(io.BytesIO(withsrc)).convert("RGB")
+    band = img.crop((0, 20, img.width, 70))
+    assert any(r > 140 and g > 140 and b > 140 for r, g, b in band.getdata())

@@ -61,6 +61,29 @@ def lyrics_position(coordinator: SboomCoordinator) -> float | None:
     return max(0.0, pos + offset)
 
 
+_PROVIDER_LABELS = {
+    "zvuk": "Sber Звук",
+    "salute": "Салют",
+    "youtube": "YouTube",
+    "spotify": "Spotify",
+}
+
+
+def provider_label(provider: str | None) -> str | None:
+    """Человекочитаемое имя провайдера (zvuk → «Sber Звук»)."""
+    if not provider:
+        return None
+    return _PROVIDER_LABELS.get(provider, provider)
+
+
+def source_label(track: TrackInfo | None) -> str | None:
+    """Плашка источника для караоке-кадра: «Плейлист · Провайдер»."""
+    if track is None:
+        return None
+    parts = [p for p in (track.playlist_title, provider_label(track.provider)) if p]
+    return " · ".join(parts) or None
+
+
 def cover_url(track: TrackInfo) -> str | None:
     """URL обложки трека из public Zvuk CDN (без auth)."""
     if not track or track.provider != "zvuk":
