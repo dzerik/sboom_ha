@@ -50,3 +50,64 @@ async def test_load_lyrics_cache_skips_garbage_entries():
     await coord.lyrics.async_load()
     assert "ok" in coord.lyrics.by_track
     assert "bad" not in coord.lyrics.by_track
+
+
+# ─────────────── волатильная лирика для BT/радио (без диск-кэша) ───────────────
+
+from sboom_ha.lyrics_manager import _synthetic_key  # noqa: E402
+
+from tests._fakes import make_track  # noqa: E402
+
+
+def test_synthetic_key_from_title_and_artists():
+    """Ключ некаталожного трека: title|artists (lower); без исполнителя — None."""
+    assert _synthetic_key(make_track(title="Song", artists=["A", "B"], track_id=None)) == "song|a,b"
+    assert _synthetic_key(make_track(title="Song", artists=[], track_id=None)) is None
+    assert _synthetic_key(make_track(title=None, artists=["A"], track_id=None)) is None
+
+
+def test_current_for_bt_track_uses_volatile_slot_not_catalog():
+    """BT/радио (track_id=None) обслуживается волатильным слотом по synthetic-ключу."""
+    lm = build_coordinator().lyrics
+    bt = make_track(title="I Put a Spell on You", artists=["Bonnie Tyler"], track_id=None)
+    assert lm.current_for(bt) is None                 # ещё не загружено
+    lm._volatile_key = _synthetic_key(bt)
+    lm._volatile = _lyrics("bt lyrics")
+    assert lm.current_for(bt).plain == "bt lyrics"
+    # другой некаталожный трек — ключ не совпал, слот не отдаётся
+    assert lm.current_for(make_track(title="Other", artists=["X"], track_id=None)) is None
+
+
+def test_volatile_lyrics_never_persisted_to_store():
+    """Волатильная лирика (BT/радио) не попадает в снимок для Store."""
+    lm = build_coordinator().lyrics
+    lm._volatile_key = "song|artist"
+    lm._volatile = _lyrics("ephemeral")
+    lm.by_track = {"555": _lyrics("catalog")}
+    assert set(lm.cache_snapshot()) == {"555"}         # только каталожное
+
+
+@pytest.mark.asyncio
+async def test_fetch_volatile_sets_slot_without_touching_catalog(monkeypatch):
+    """_fetch_volatile кладёт результат в слот и НЕ трогает каталожный кэш/Store."""
+    async def fake_fetch(*a, **k):
+        return _lyrics("fetched")
+    monkeypatch.setattr("sboom_ha.lyrics_manager.fetch_lyrics", fake_fetch)
+    lm = build_coordinator().lyrics
+    await lm._fetch_volatile("k|v", "T", "A", None, None)
+    assert lm._volatile_key == "k|v"
+    assert lm._volatile.plain == "fetched"
+    assert lm.by_track == {}                            # каталог не тронут
+    assert lm.cache_snapshot() == {}                    # в Store ничего не уйдёт
+
+
+@pytest.mark.asyncio
+async def test_fetch_volatile_network_error_leaves_slot_empty(monkeypatch):
+    """Сетевая ошибка (fetch→None) не выставляет слот — будет retry."""
+    async def fake_fetch(*a, **k):
+        return None
+    monkeypatch.setattr("sboom_ha.lyrics_manager.fetch_lyrics", fake_fetch)
+    lm = build_coordinator().lyrics
+    await lm._fetch_volatile("k|v", "T", "A", None, None)
+    assert lm._volatile_key is None
+    assert lm._volatile is None

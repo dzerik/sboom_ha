@@ -31,6 +31,13 @@ LYRICS_STORE_VERSION = 1
 LYRICS_SAVE_DELAY_SEC = 30
 
 
+def _synthetic_key(track: TrackInfo) -> str | None:
+    """Ключ для НЕкаталожного трека (BT/радио, без track_id): title|artists."""
+    if track.title and track.artists:
+        return f"{track.title}|{','.join(track.artists)}".lower()
+    return None
+
+
 class LyricsManager:
     """Кэш track_id → Lyrics (None = искали, не нашли) + загрузка и персист."""
 
@@ -52,6 +59,12 @@ class LyricsManager:
         self._on_update = on_update
         self.by_track: dict[str, Lyrics | None] = {}
         self._inflight: set[str] = set()
+        # Волатильная лирика для НЕкаталожного контента (BT/радио — нет track_id).
+        # НЕ персистится в Store: BT — почти всегда одноразовая чужая музыка,
+        # радио — эфемерно, засорять диск-кэш незачем. Один слот на текущий
+        # трек: пока играет тот же — не перезапрашиваем API каждый poll.
+        self._volatile_key: str | None = None
+        self._volatile: Lyrics | None = None
         # Персистентный кеш (JSON в .storage/, переживает рестарты HA).
         self._store: Store = Store(
             hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}"
@@ -63,16 +76,27 @@ class LyricsManager:
 
     def current_for(self, track: TrackInfo | None) -> Lyrics | None:
         """Lyrics для трека (или None если ещё не загружено / не нашлось)."""
-        if not track or not track.track_id:
+        if not track:
             return None
-        return self.by_track.get(track.track_id)
+        if track.track_id:  # каталог Zvuk — персистентный кэш
+            return self.by_track.get(track.track_id)
+        # BT/радио — волатильный слот (без обращения к диск-кэшу).
+        key = _synthetic_key(track)
+        if key is not None and key == self._volatile_key:
+            return self._volatile
+        return None
 
     def maybe_fetch(self, track: TrackInfo | None) -> None:
         """Запустить background fetch для трека, если ещё не загружали."""
-        if not self._enabled:
+        if not self._enabled or not track or not track.title or not track.artists:
             return
-        if not track or not track.track_id or not track.title or not track.artists:
-            return
+        if track.track_id:
+            self._schedule_catalog_fetch(track)
+        else:
+            self._schedule_volatile_fetch(track)
+
+    def _schedule_catalog_fetch(self, track: TrackInfo) -> None:
+        """Каталожный трек (track_id): персистентный кэш + Store."""
         tid = track.track_id
         if tid in self.by_track or tid in self._inflight:
             return
@@ -93,6 +117,46 @@ class LyricsManager:
             ),
             name=f"{DOMAIN}-lyrics-{tid}",
         )
+
+    def _schedule_volatile_fetch(self, track: TrackInfo) -> None:
+        """НЕкаталожный трек (BT/радио): fetch напрямую, без диск-кэша."""
+        key = _synthetic_key(track)
+        if key is None or key == self._volatile_key or key in self._inflight:
+            return
+        self._inflight.add(key)
+        self._entry.async_create_background_task(
+            self._hass,
+            self._fetch_volatile(
+                key,
+                track.title,
+                ", ".join(track.artists),
+                track.album,
+                track.duration_sec,
+            ),
+            name=f"{DOMAIN}-lyrics-volatile",
+        )
+
+    async def _fetch_volatile(
+        self,
+        key: str,
+        title: str,
+        artist: str,
+        album: str | None,
+        duration_sec: int | None,
+    ) -> None:
+        """Загрузка для BT/радио: результат в волатильный слот, НЕ в Store."""
+        try:
+            result = await fetch_lyrics(
+                self._http, title, artist, album, duration_sec,
+                use_netease=self._netease_fallback,
+            )
+            if result is None:
+                return  # сетевая ошибка — retry при следующем track-update
+            self._volatile_key = key
+            self._volatile = result
+            self._on_update()
+        finally:
+            self._inflight.discard(key)
 
     async def _fetch(
         self,
