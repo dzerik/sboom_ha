@@ -29,3 +29,4 @@ Thumbs.db
 /research/experiments/__pycache__/
 /research/events.jsonl
 CODE_REVIEW.md
+research/fw_snapshots/
