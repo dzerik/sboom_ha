@@ -51,7 +51,7 @@ onCommand(msg):
 | 15 | SET_TRACK_POS | write | ✅ seek |
 | 16 | MEDIA_COMMAND (16 суб-действий) | write | ✅ |
 | 17 | GET_PLAYING_QUEUE | read | ⚠️ только trackId |
-| 18 | KEEP_ALIVE | — | ✅ (молчит) |
+| 18 | HEARTBEAT (keepalive) | — | ✅ (молчит) |
 | 19 | GET_PAIRED_BT | read | ✅ |
 | 20 | BT_DEVICE_COMMAND | write | ✅ |
 | 21 | GET_SCANNED_BT | read | ✅ |
@@ -61,6 +61,16 @@ onCommand(msg):
 `op_map` (эмпирика, sweep 1–62): JSON-ответ дают только **10, 12, 17**; молчит
 **18**; остальные 1–9, 11, 19–62 → минимальный ack (команды/эхо/диагностика).
 op 5 = pair-cancel, 6 = acknowledge, 8 = focus voice_auth.
+
+**op 18 = HEARTBEAT (keepalive)** — почему молчит, подтверждено с трёх сторон:
+(1) в цепочке из 18 сервисных обработчиков дискриминатор 18 не встречается
+вообще — команда не роутится в сервисы; (2) в клиенте есть отдельный
+транспортный keepalive `BasicStarOSClient/BasicStarOSWsClient::pingPong(StarMessage)`
++ тип `ru.sber.staros.protobuf.PingPong` — heartbeat гасится на уровне
+соединения; (3) `HEARTBEAT` присутствует значением в топ-левел командном enum
+(рядом с `CLOSE_APP`/`GET_IHUB_TOKEN`/`RUN_APP`/`RUN_APP_DEEPLINK`/`SERVER_ACTION`/
+`UPDATE_IP`). Т.е. 18 — служебный keepalive: сервер принимает и молча держит
+сессию (не шлёт data-ответ), что и наблюдали в sweep.
 
 Номера op 24–62 → команды из каталога ниже (SET_ALARM/SET_TIMER/DEVICE_SLEEP/…),
 точная привязка номеров — TODO (эмпирический sweep + сверка эффектов).
