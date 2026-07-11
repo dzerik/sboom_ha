@@ -187,6 +187,39 @@ _SetVolume/_SetOverrun), `MultiRoomInfo`, `MultiRoomState`, `MultiRoomMessage`,
 `GamepadSessionConnectionInfo`, `StartVideoGestureRecording`,
 `StopVideoGestureRecording`, `SkipKeyboard`, `SkipStep`, `ConfirmResponse`
 
+## Реконструкция .proto — метод и статус (spike ✅)
+
+**Важная поправка:** ранее считали, что в lite-сборке имена полей вырезаны. Это
+НЕ так — в клиенте присутствуют `full_name` полей в формате
+`ru.sber.staros.protobuf.<Message>[.<Nested>].<field>` (напр.
+`StarMessage.User.user_id`, `StarMessage.JsonWebToken.header`,
+`StarMessage.Directive.payload`). Причина: клиент проверяет UTF-8 строковых
+полей и передаёт туда имя поля для диагностики — так имена попадают в бинарь.
+
+**Метод извлечения** (проверен на 3 сообщениях): у каждого сообщения есть
+функция-сериализатор, из которой читается связка **номер поля + wire-тип +
+тип + имя (для строк) + offset**:
+- `WriteString(ctx, N, str, out)` → строковое поле номер N (+ имя из UTF-8-проверки);
+- запись тега-байта `(N<<3)|2` → поле N, суб-сообщение (LEN);
+- типизированные writer'ы (`WriteInt32`/`WriteBool`/`WriteEnum`/…) → скаляры.
+
+**Что извлекается надёжно:** имена сообщений (272) и enum-значений; номера,
+wire-типы, типы полей; имена строковых полей; offset'ы; oneof/repeated.
+**Слабое место:** имена НЕ строковых полей (суб-сообщения/скаляры) UTF-8 не
+проверяются → имя берётся из второго источника (JSON-ответы для read-полей,
+эмпирика для write) или остаётся синтетическим.
+
+**Пример (spike, реконструкция из сериализаторов):**
+```proto
+message JsonWebToken { string header=1; string payload=2; string signature=3; }
+message User { string user_id=1; string access_token=2; string vps_user_id=3;
+               SubMsg field4=4; SubMsg field5=5; }
+message Volume { SubMsg field1=1; string payload=2; }
+```
+
+Вывод: полноценный `.proto` восстановим (с реальными именами для строковых
+полей). Разумный объём — **таргетно** под фичи sboom_ha, не слепой дамп 272.
+
 ## SberCast под-протокол (`sbercast.protobuf`, отдельный сокет)
 
 Пары `_Request/_Response`:
