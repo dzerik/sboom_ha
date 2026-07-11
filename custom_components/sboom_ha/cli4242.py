@@ -64,28 +64,52 @@ def parse_zigbee_list(text: str) -> list[ZigbeeDevice]:
     return devices
 
 
-def matter_count(text: str) -> int:
-    """Число Matter-устройств из вывода `matter list`.
+@dataclass(frozen=True)
+class MatterDevice:
+    node_id: str
+    serial: str
+    model: str
+    rssi: int | None
+    xid: str = ""
 
-    Пустой список → 0. Формат строки устройства не подтверждён, поэтому
-    считаем непустые не-заголовочные строки (табличные `| ... |` либо
-    построчные) — грубая, но безопасная оценка до реального захвата.
+
+def _is_node_id(s: str) -> bool:
+    """NodeId — 16-значный hex. Отсекает заголовок 'NodeId' и разделители '---'."""
+    return len(s) >= 8 and all(c in "0123456789abcdefABCDEF" for c in s)
+
+
+def parse_matter_list(text: str) -> list[MatterDevice]:
+    """ASCII-таблица `matter list` → список Matter-устройств.
+
+    Заголовок: | NodeId | XID | Serial number | Model ID | Can report RSSI | RSSI |
+    Строка данных распознаётся по NodeId (hex) в первой колонке — заголовок
+    ('NodeId') и разделители ('|---|') отсекаются автоматически. Пустой
+    список ('...is empty') → [].
     """
-    if "empty" in text.lower():
-        return 0
-    rows = 0
+    devices: list[MatterDevice] = []
     for line in text.splitlines():
         line = line.strip()
-        if not line or line.lower().startswith(("valid commands", "node id", "not found")):
+        if not line.startswith("|"):
             continue
-        if line.startswith("|"):
-            cells = [c.strip() for c in line.strip("|").split("|")]
-            if set("".join(cells)) <= set("-") or cells[0] in ("#", ""):
-                continue
-            rows += 1
-        elif line[0].isdigit():
-            rows += 1
-    return rows
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 4 or not _is_node_id(cells[0]):
+            continue  # заголовок / разделитель / битая строка
+        try:
+            rssi = int(cells[5])
+        except (ValueError, IndexError):
+            rssi = None
+        devices.append(
+            MatterDevice(
+                node_id=cells[0], xid=cells[1], serial=cells[2],
+                model=cells[3], rssi=rssi,
+            )
+        )
+    return devices
+
+
+def matter_count(text: str) -> int:
+    """Число Matter-устройств из вывода `matter list` (0 для пустого списка)."""
+    return len(parse_matter_list(text))
 
 
 class Cli4242Client:
@@ -148,19 +172,23 @@ class Cli4242Client:
         return parse_zigbee_list(resp)
 
     async def async_matter_probe(self) -> bool:
-        """Matter-контроллер доступен? (`matter list` отвечает валидно)."""
-        resp = await self._run("matter list")
-        return resp is not None and "matter" in resp.lower()
+        """Matter-контроллер доступен? — `matter list` ответил чем угодно, кроме
+        ошибки «команды нет».
 
-    async def async_matter_list(self) -> tuple[int, str] | None:
-        """Инвентарь Matter → (количество устройств, сырой вывод).
-
-        Формат СТРОКИ устройства Matter не подтверждён (нет живого захвата с
-        Matter-устройством — список пуст), поэтому структуру полей пока не
-        разбираем: отдаём count + сырой текст для отладки. Структурируем,
-        когда появится реальное устройство. None — CLI недоступен.
+        ВАЖНО: раньше проверялось `"matter" in resp`, но реальная таблица
+        устройства (`| NodeId | XID | Serial ... |`) слова «matter» НЕ содержит,
+        из-за чего с подключённым Matter-устройством probe ложно возвращал False
+        и сенсор пропадал. Теперь: есть ответ и это НЕ error-вывод CLI.
         """
         resp = await self._run("matter list")
         if resp is None:
+            return False
+        low = resp.lower()
+        return "not found" not in low and "valid commands" not in low
+
+    async def async_matter_list(self) -> tuple[list[MatterDevice], str] | None:
+        """Инвентарь Matter → (список устройств, сырой вывод). None — CLI недоступен."""
+        resp = await self._run("matter list")
+        if resp is None:
             return None
-        return matter_count(resp), resp.strip()
+        return parse_matter_list(resp), resp.strip()

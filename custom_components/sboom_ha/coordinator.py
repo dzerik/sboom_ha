@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from ._parsers import track_from_state
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
-from .cli4242 import Cli4242Client, ZigbeeDevice
+from .cli4242 import Cli4242Client, MatterDevice, ZigbeeDevice
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
@@ -134,7 +134,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.has_matter_cli: bool = False
         self.iio_reading: IioReading = IioReading()
         self.zigbee_devices: list[ZigbeeDevice] = []
-        self.matter_count: int = 0
+        self.matter_devices: list[MatterDevice] = []
         self.matter_raw: str = ""
         self._hw_poll_tick = 0
         # Подряд идущие полностью неудачные poll-циклы при живом на вид сокете —
@@ -227,7 +227,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _poll_matter(self) -> None:
         res = await self._cli.async_matter_list()
         if res is not None:
-            self.matter_count, self.matter_raw = res
+            self.matter_devices, self.matter_raw = res
 
     async def _connect_and_sync(self) -> None:
         """Один connect + listener + стартовый sync. Бросает исключение при неудаче.

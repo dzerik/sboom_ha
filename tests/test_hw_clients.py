@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
-from sboom_ha.cli4242 import matter_count, parse_zigbee_list
+import pytest
+from sboom_ha.cli4242 import (
+    Cli4242Client,
+    matter_count,
+    parse_matter_list,
+    parse_zigbee_list,
+)
 from sboom_ha.iio_client import IioCapability, parse_context, parse_read_value
 
 _FIX = Path(__file__).parent / "fixtures"
@@ -122,12 +129,51 @@ def test_hw_partial_capability_only_available_sensors():
     assert avail == {"soc_temperature"}
 
 
-def test_matter_count_empty_and_devices():
-    """matter_count: пустой список → 0; строки-устройства считаются.
-    Формат строки Matter не подтверждён (нет устройства), поэтому оценка
-    грубая — но безопасная для обоих вероятных форматов."""
+# Реальный захват `matter list` с колонки (одно устройство). Заголовок
+# таблицы слова «matter» НЕ содержит — регресс, из-за которого probe ложно
+# отключал сенсор при подключённом Matter-устройстве.
+_MATTER_TBL = (
+    "| NodeId | XID | Serial number | Model ID | Can report RSSI | RSSI |\n"
+    "|------------------|----------------------|-----------|------------------|-----------------|------|\n"
+    "| 0000B81601A8B0D3 | cingsma4finr81daq3a0 | FCH1000237 | MTFFF40002 | yes | -55 |\n"
+)
+
+
+def test_parse_matter_list_real_device():
+    """Реальная таблица → одно устройство; заголовок и разделитель отсечены."""
+    devs = parse_matter_list(_MATTER_TBL)
+    assert len(devs) == 1
+    d = devs[0]
+    assert d.node_id == "0000B81601A8B0D3"  # заголовок 'NodeId' (не hex) не попал
+    assert d.model == "MTFFF40002"
+    assert d.serial == "FCH1000237"
+    assert d.rssi == -55
+
+
+def test_matter_count_real_table_and_empty():
+    """Заголовок НЕ считается устройством (регресс: было 2 вместо 1)."""
+    assert matter_count(_MATTER_TBL) == 1
     assert matter_count("Matter device list is empty") == 0
     assert matter_count("") == 0
-    tbl = "| # | Node | Vendor |\n|---|---|---|\n| 1 | 0x123 | Acme |\n| 2 | 0x456 | Foo |"
-    assert matter_count(tbl) == 2
-    assert matter_count("1 node abc\n2 node def") == 2
+
+
+@pytest.mark.asyncio
+async def test_matter_probe_accepts_real_device_table():
+    """КОРЕНЬ РЕГРЕССА: probe должен принять таблицу устройства (без слова 'matter').
+
+    Раньше проверялось `"matter" in resp` → с подключённым устройством probe
+    возвращал False, has_matter_cli становился False, сенсор пропадал.
+    """
+    c = Cli4242Client("host")
+    c._run = AsyncMock(return_value=_MATTER_TBL)
+    assert await c.async_matter_probe() is True
+
+
+@pytest.mark.asyncio
+async def test_matter_probe_rejects_missing_command_and_none():
+    """Нет matter-подкоманды (error-вывод CLI) или нет ответа → False."""
+    c = Cli4242Client("host")
+    c._run = AsyncMock(return_value="Not found: matter list\nValid commands:\n  zigbee")
+    assert await c.async_matter_probe() is False
+    c._run = AsyncMock(return_value=None)
+    assert await c.async_matter_probe() is False

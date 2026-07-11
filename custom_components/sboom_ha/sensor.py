@@ -375,18 +375,23 @@ HW_SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
             ]
         },
     ),
-    # Инвентарь Matter-устройств колонки (debug-CLI). State = количество;
-    # сырой вывод — в атрибуте raw (формат строки устройства подтвердится с
-    # реальным Matter-устройством). В отличие от Zigbee, Matter даёт и
-    # чтение (attr), и управление (send_cmd) — но это отдельная фича. Diagnostic.
+    # Инвентарь Matter-устройств колонки (debug-CLI). State = количество,
+    # список (node_id/модель/серийник/RSSI) — в атрибутах. Формат таблицы
+    # подтверждён на реальном устройстве. Только чтение инвентаря. Diagnostic.
     SboomSensorSpec(
         key="matter_inventory",
         translation_key="matter_inventory",
         icon="mdi:home-automation",
         entity_category=EntityCategory.DIAGNOSTIC,
         available_fn=lambda c: c.has_matter_cli,
-        value_fn=lambda c: c.matter_count,
-        attrs_fn=lambda c: {"raw": c.matter_raw} if c.matter_raw else None,
+        value_fn=lambda c: len(c.matter_devices),
+        attrs_fn=lambda c: {
+            "devices": [
+                {"node_id": d.node_id, "model": d.model,
+                 "serial": d.serial, "rssi": d.rssi}
+                for d in c.matter_devices
+            ]
+        } if c.matter_devices else None,
     ),
 )
 

@@ -4,6 +4,12 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.29.1]
+
+### Fixed
+- **Matter-сенсор пропадал (`unavailable`) при подключении реального Matter-устройства к колонке.** Probe `async_matter_probe` искал слово «matter» в выводе `matter list`, но реальная таблица устройства (`| NodeId | XID | Serial number | Model ID | … |`) его не содержит → probe ложно возвращал `False` → `has_matter_cli=False` → сенсор не пересоздавался при рестарте (становился restored/`unavailable`). Теперь probe определяет доступность по отсутствию error-вывода CLI (не по слову «matter»).
+- **`matter list` парсится в структуру** (node_id / serial / model / RSSI): сенсор показывает список устройств в атрибутах, а count больше не считает строку-заголовок за устройство. Формат подтверждён на реальном устройстве (`MTFFF40002`).
+
 ## [0.29.0]
 
 ### Added
