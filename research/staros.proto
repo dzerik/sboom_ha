@@ -1,7 +1,6 @@
-// Реконструкция протокола StarOS (:20000 WSS) из клиента.
-// protobuf 3.10. Имена строковых полей — реальные (UTF-8-verify);
-// message/скаляры — по wire-тегам; имена не-строковых полей и точные
-// суб-типы помечены TBD. Всего сообщений: 154 (top-level 102 + вложенных 52).
+// Протокол StarOS (:20000 WSS), реконструкция из клиента. protobuf 3.10.
+// Имена строковых полей — реальные; типы message резолвнуты где возможно
+// (25 полей, помечены '←'); имена не-строковых полей и часть типов — TBD.
 syntax = "proto3";
 package ru.sber.staros.protobuf;
 
@@ -10,10 +9,10 @@ message Alarm {
   string sound_id = 2;
   int32 field3 = 3; // int32/enum
   bool field6 = 6;
-  repeated bytes field7 = 7; // <sub-message> TBD
+  repeated Alarm_AlarmAction field7 = 7; // ← Alarm.AlarmAction
   oneof payload {
-    bytes field4 = 4; // <sub-message> TBD
-    bytes field5 = 5; // <sub-message> TBD
+    Alarm_Timer field4 = 4; // ← Alarm.Timer
+    Alarm_AlarmClock field5 = 5; // ← Alarm.AlarmClock
   }
 }
 
@@ -72,7 +71,7 @@ message AssistantInfo {
 
 message AssistantPlayerStart {
   bytes field1 = 1; // <sub-message> TBD
-  bytes field2 = 2; // <sub-message> TBD
+  SmartAppInfo field2 = 2; // ← SmartAppInfo
   string payload = 3;
 }
 
@@ -103,7 +102,7 @@ message Backup {
 
 message BaseSmartAppCommand {
   bytes field1 = 1; // <sub-message> TBD
-  bytes field2 = 2; // <sub-message> TBD
+  SmartAppInfo field2 = 2; // ← SmartAppInfo
   string payload = 3;
 }
 
@@ -179,7 +178,7 @@ message DownloadSettings {
   string url = 1;
   int32 field2 = 2; // int32/enum
   string download_dir = 3;
-  bytes field4 = 4; // <sub-message> TBD
+  DownloadSettings_RsaVerification field4 = 4; // ← DownloadSettings.RsaVerification
   int32 field5 = 5; // int32/enum
   int32 field6 = 6; // int32/enum
   repeated bytes field7 = 7; // <sub-message> TBD
@@ -189,7 +188,7 @@ message DownloadSettings {
 
 message DownloadStatus {
   string name = 1;
-  bytes field2 = 2; // <sub-message> TBD
+  DownloadSettings field2 = 2; // ← DownloadSettings
   int32 field3 = 3; // int32/enum
   int32 field4 = 4; // int32/enum
   int32 field5 = 5; // int32/enum
@@ -204,7 +203,7 @@ message DownloadedUpdateInfo {
   bool field2 = 2;
   string file_path = 3;
   int32 field4 = 4; // int32/enum
-  bytes field5 = 5; // <sub-message> TBD
+  Metadata field5 = 5; // ← Metadata
   int32 field6 = 6; // int32/enum
 }
 
@@ -326,7 +325,7 @@ message MultiRoomCommand {
   oneof payload {
     bytes field2 = 2; // <sub-message> TBD
     bytes field3 = 3; // <sub-message> TBD
-    bytes field4 = 4; // <sub-message> TBD
+    MultiRoomCommand_CreatePlayer field4 = 4; // ← MultiRoomCommand.CreatePlayer
     bytes field5 = 5; // <sub-message> TBD
     bytes field6 = 6; // <sub-message> TBD
     bytes field7 = 7; // <sub-message> TBD
@@ -340,9 +339,9 @@ message MultiRoomMessage {
   int32 field10 = 10; // int32/enum
   string mr_sesssion_id = 11;
   oneof payload {
-    bytes field3 = 3; // <sub-message> TBD
-    bytes field4 = 4; // <sub-message> TBD
-    bytes field5 = 5; // <sub-message> TBD
+    MultiRoomState field3 = 3; // ← MultiRoomState
+    MultiRoomCommand field4 = 4; // ← MultiRoomCommand
+    StereoPairMessage field5 = 5; // ← StereoPairMessage
     bytes field6 = 6; // <sub-message> TBD
     bytes field7 = 7; // <sub-message> TBD
     bytes field8 = 8; // <sub-message> TBD
@@ -391,8 +390,8 @@ message PartnerTokenRequest {
 message PartnerTokenResult {
   string partner_id = 1;
   oneof payload {
-    bytes field2 = 2; // <sub-message> TBD
-    bytes field3 = 3; // <sub-message> TBD
+    PartnerTokenResult_PartnerToken field2 = 2; // ← PartnerTokenResult.PartnerToken
+    PartnerTokenResult_Error field3 = 3; // ← PartnerTokenResult.Error
   }
 }
 
@@ -421,7 +420,7 @@ message PushNotification {
   string push_id = 3;
   oneof payload {
     bytes field1 = 1; // <sub-message> TBD
-    bytes field2 = 2; // <sub-message> TBD
+    SmartAppPush field2 = 2; // ← SmartAppPush
   }
 }
 
@@ -513,7 +512,7 @@ message ScreenState {
 message ServerAction {
   string app_id = 1;
   string payload = 3;
-  bytes field4 = 4; // <sub-message> TBD
+  SmartAppInfo field4 = 4; // ← SmartAppInfo
   int32 field5 = 5; // int32/enum
   int32 field6 = 6; // int32/enum
   int32 field7 = 7; // int32/enum
@@ -544,7 +543,7 @@ message SetEnvironment {
 message SetMusicAlarm {
   bytes field1 = 1; // <sub-message> TBD
   repeated string ids = 2;
-  bytes field3 = 3; // <sub-message> TBD
+  MusicAlarmInfo field3 = 3; // ← MusicAlarmInfo
 }
 
 message SetRemoteMic {
@@ -579,9 +578,9 @@ message SmartApp {
   string id = 1;
   int32 field2 = 2; // int32/enum
   string meta = 3;
-  bytes field4 = 4; // <sub-message> TBD
+  DownloadStatus field4 = 4; // ← DownloadStatus
   int32 field6 = 6; // int32/enum
-  bytes field7 = 7; // <sub-message> TBD
+  SmartAppInfo field7 = 7; // ← SmartAppInfo
   string backup_path = 8;
   bool field10 = 10;
   bool field11 = 11;
@@ -680,7 +679,7 @@ message StarMessage {
   }
   message BLEEasySetup {
     int32 field1 = 1; // int32/enum
-    bytes field2 = 2; // <sub-message> TBD
+    BLESetupDevice field2 = 2; // ← BLESetupDevice
     string pin_code = 3;
   }
   message BLESetMeUp {
@@ -711,7 +710,7 @@ message StarMessage {
     string name = 1;
     string payload = 2;
     string android_application_id = 3;
-    bytes field4 = 4; // <sub-message> TBD
+    SmartAppInfo field4 = 4; // ← SmartAppInfo
     int32 field5 = 5; // int32/enum
     int32 field6 = 6; // int32/enum
     string sbercast_client_name = 7;
@@ -839,7 +838,7 @@ message StarMessage {
   }
   message SetDownload {
     string name = 1;
-    bytes field2 = 2; // <sub-message> TBD
+    DownloadSettings field2 = 2; // ← DownloadSettings
   }
   message SetFaceDescriptor {
     string user_id = 1;
@@ -885,8 +884,8 @@ message StarMessage {
     string user_id = 1;
     string access_token = 2;
     string vps_user_id = 3;
-    bytes field4 = 4; // <sub-message> TBD
-    bytes field5 = 5; // <sub-message> TBD
+    EsaAuthState field4 = 4; // ← EsaAuthState
+    BackendAuthState field5 = 5; // ← BackendAuthState
   }
   message UserCertificate {
     string certificate = 1;
@@ -896,7 +895,7 @@ message StarMessage {
 message StarMessage2 {
   bytes field1 = 1; // <sub-message> TBD
   string uuid = 2;
-  bytes field5 = 5; // <sub-message> TBD
+  StarAny field5 = 5; // ← StarAny
 }
 
 message StereoPairMessage {
