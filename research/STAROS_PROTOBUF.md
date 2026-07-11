@@ -220,6 +220,42 @@ message Volume { SubMsg field1=1; string payload=2; }
 Вывод: полноценный `.proto` восстановим (с реальными именами для строковых
 полей). Разумный объём — **таргетно** под фичи sboom_ha, не слепой дамп 272.
 
+## Возможности устройства (device capabilities)
+
+Прошивка `box` **единая для всех StarOS-устройств** (`sberboom`, `sberboom-mini`,
+`sberbox`, `sberportal`, `satellite`…) — поэтому содержит все команды, а конкретная
+модель поддерживает подмножество. Набор возможностей выражен **enum feature-флагов**
+(значения отсортированы по алфавиту — protobuf enum):
+
+```
+CAN_OPEN_APPS · HAS_BLUETOOTH · HAS_YOUTUBE · HAS_SMOTRESHKA
+HAS_SERVER_DEFINED_CEC · HAS_USER_CONTROLLED_CEC
+HOME_SECURITY_FEATURE_ENABLED · IS_EDU_MODE
+MUSIC_BLE_DEEPLINK_FEATURE_ENABLED · MUSIC_ENABLE_FLAC · MUSIC_SHOW_VISUALIZER
+UNDEFINED_FLAG (+ Capabilities.hasScreen)
+```
+
+**Идентичность модели:** `DeviceInfo` = { brand_name, device_id,
+device_serial_number, display_name, product, **surface**, vendor, version }.
+`surface`/`product` = форм-фактор (напр. `sberboom-mini`) → по нему клиент решает,
+что показывать. Модель нашего устройства — `sberboom-r2`.
+
+**Где живут флаги:** backend шлёт JSON-конфиги — `CommonConfig.config`
+(`Configuration::commonConfig() → Json::Value`) и `AppSettings.app_settings_json`;
+device их сохраняет. TV-специфика (CEC/IR/экран/подсветка) — в `Capabilities` /
+`CapabilitiesState` (+ `CapabilityCommand`: CAP_TV_ON/OFF/TOGGLE, CAP_VOLUME_*).
+
+**Как использовать в sboom_ha:** вместо угадывания op — читать `DeviceInfo`
+(product/surface → профиль модели) и искать флаги в живом `GET_STATE` (op 12,
+уже принимаем JSON). Проверить эмпирически: снять GET_STATE с колонки и найти
+ключи product/surface/flags/capabilities.
+
+**Каталог enum'ов протокола** (в .rodata packed-таблицами): типы директив
+(SHOW_YOUTUBE/STOP_PLAYERS/VOLUME_UP…), источники команд (VOICE/TEXT/SBER_CAST/
+SERVER_ACTION…), аудио-фокус (GAIN/LOSS…), аудио-потоки (STREAM_ALARM/ASSISTANT/
+BLUETOOTH/MUSIC), ServerAction (ADD_USER/REBOOT_DEVICE/SET_MUTE/SET_SCREEN/
+SET_VOLUME/UNLINK_DEVICE…), статусы сети/обновлений/приложений.
+
 ## SberCast под-протокол (`sbercast.protobuf`, отдельный сокет)
 
 Пары `_Request/_Response`:
