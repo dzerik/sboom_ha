@@ -30,3 +30,6 @@ Thumbs.db
 /research/events.jsonl
 CODE_REVIEW.md
 research/fw_snapshots/
+
+# живые дампы состояния колонки (приватные значения)
+research/state_dump/
