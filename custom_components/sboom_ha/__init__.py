@@ -80,11 +80,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> boo
 async def _async_register_panel(
     hass: HomeAssistant, entry: SboomConfigEntry
 ) -> None:
-    """Раздать www/ и зарегистрировать built-in panel (один раз на HA).
+    """Раздать www/ и (опционально) зарегистрировать built-in panel.
 
-    Управляется опцией `panel_enabled` (Settings → Integrations → SBoom →
-    Configure). При выключении — снимаем панель из бокового меню.
+    **Статика `/sboom_panel` раздаётся ВСЕГДА**, независимо от опции
+    `panel_enabled`: Lovelace-карточка `sboom-card` импортирует общие
+    компоненты из `/sboom_panel/…` в рантайме и должна работать даже при
+    отключённой боковой панели. Опцией `panel_enabled` (Settings →
+    Integrations → SBoom → Configure) управляется только пункт в боковом меню.
     """
+    # 1. Статика www/ — один раз на HA, вне зависимости от panel_enabled.
+    static_marker = f"{DOMAIN}_static_registered"
+    if not hass.data.get(static_marker):
+        panel_dir = str(pathlib.Path(__file__).parent / "www")
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(PANEL_STATIC_PATH, panel_dir, cache_headers=False)]
+        )
+        # Версия из manifest → cache-buster JS меняется вместе с версией.
+        integration = await async_get_integration(hass, DOMAIN)
+        hass.data[f"{DOMAIN}_version"] = integration.version or "0"
+        hass.data[static_marker] = True
+
+    # 2. Боковая панель — по опции panel_enabled.
     marker = f"{DOMAIN}_panel_registered"
     if not entry.options.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED):
         if hass.data.pop(marker, None):
@@ -93,15 +109,7 @@ async def _async_register_panel(
     if hass.data.get(marker):
         return
 
-    panel_dir = str(pathlib.Path(__file__).parent / "www")
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(PANEL_STATIC_PATH, panel_dir, cache_headers=False)]
-    )
-    # Версия из manifest → cache-buster JS меняется вместе с версией интеграции.
-    integration = await async_get_integration(hass, DOMAIN)
-    version = integration.version or "0"
-    hass.data[f"{DOMAIN}_version"] = version
-
+    version = hass.data[f"{DOMAIN}_version"]
     async_register_built_in_panel(
         hass,
         component_name="custom",

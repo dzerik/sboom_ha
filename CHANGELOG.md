@@ -4,6 +4,12 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.35.1]
+
+### Changed
+- **Рефактор фронтенда для переиспользования**: data-feed логика панели (push-подписка `sboom/subscribe` + poll-fallback + devices/state/seek/toast-релей) вынесена в общий базовый класс `SboomFeedBase` (`www/components/sboom-feed-base.js`); дизайн-токены `--sb-*` — в `www/components/sboom-tokens.css.js`. Панель наследует базу без изменения поведения. Открывает путь для standalone Lovelace-карточки (`sboom-card`), переиспользующей те же компоненты и feed-слой.
+- **Статика `/sboom_panel` теперь раздаётся всегда**, независимо от опции `panel_enabled` — раздача www/ отвязана от регистрации боковой панели. Опция гейтит только пункт в боковом меню; общие компоненты остаются доступны для Lovelace-карточки `sboom-card` даже при выключенной панели.
+
 ## [0.35.0]
 
 ### Added
