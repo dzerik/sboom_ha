@@ -78,7 +78,8 @@
           "lyrics_enabled": "Загружать synced lyrics с Lrclib.net",
           "lyrics_netease_fallback": "Использовать NetEase как резервный источник текстов",
           "lyrics_offset": "Сдвиг текста песни, секунды (+ раньше / − позже)",
-          "karaoke_fill": "Караоке-закраска (подсветка строки по мере пропевания)"
+          "karaoke_fill": "Караоке-закраска (подсветка строки по мере пропевания)",
+          "panel_enabled": "Показывать панель плеера в боковом меню"
         }
       }
     }
@@ -315,6 +316,32 @@
         "command": {
           "name": "Команда",
           "description": "Действие над устройством."
+        }
+      }
+    },
+    "play_music": {
+      "name": "Воспроизвести музыку",
+      "description": "Запустить контент на колонке по ссылке zvuk.com, поисковому запросу или id + типу.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        },
+        "url": {
+          "name": "Ссылка",
+          "description": "Ссылка zvuk.com (напр. https://zvuk.com/track/84279897)."
+        },
+        "query": {
+          "name": "Запрос",
+          "description": "Поисковый запрос — будет запущен первый подходящий результат."
+        },
+        "id": {
+          "name": "ID",
+          "description": "Каталожный id контента (вместе с полем «Тип»)."
+        },
+        "kind": {
+          "name": "Тип",
+          "description": "Тип контента для id: track / artist / release / playlist / podcast / abook."
         }
       }
     }

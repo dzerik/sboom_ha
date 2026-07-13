@@ -2,15 +2,29 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 from typing import Any
 
+from homeassistant.components.frontend import (
+    async_register_built_in_panel,
+    async_remove_panel,
+)
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 
-from .const import DOMAIN
+from .const import (
+    DEFAULT_PANEL_ENABLED,
+    DOMAIN,
+    OPT_PANEL_ENABLED,
+    PANEL_STATIC_PATH,
+    PANEL_URL_PATH,
+)
 from .coordinator import SboomCoordinator
 from .services import async_register_services
+from .websocket_api import async_setup_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +54,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     (ServiceValidationError), а не с «service not found».
     """
     async_register_services(hass)
+    async_setup_websocket_api(hass)
     return True
 
 
@@ -57,8 +72,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> boo
         # а старый координатор продолжил бы жить без владельца.
         await coordinator.async_stop()
         raise
+    await _async_register_panel(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_register_panel(
+    hass: HomeAssistant, entry: SboomConfigEntry
+) -> None:
+    """Раздать www/ и зарегистрировать built-in panel (один раз на HA).
+
+    Управляется опцией `panel_enabled` (Settings → Integrations → SBoom →
+    Configure). При выключении — снимаем панель из бокового меню.
+    """
+    marker = f"{DOMAIN}_panel_registered"
+    if not entry.options.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED):
+        if hass.data.pop(marker, None):
+            async_remove_panel(hass, PANEL_URL_PATH)
+        return
+    if hass.data.get(marker):
+        return
+
+    panel_dir = str(pathlib.Path(__file__).parent / "www")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PANEL_STATIC_PATH, panel_dir, cache_headers=False)]
+    )
+    # Версия из manifest → cache-buster JS меняется вместе с версией интеграции.
+    integration = await async_get_integration(hass, DOMAIN)
+    version = integration.version or "0"
+    hass.data[f"{DOMAIN}_version"] = version
+
+    async_register_built_in_panel(
+        hass,
+        component_name="custom",
+        sidebar_title="SberBoom",
+        sidebar_icon="mdi:speaker",
+        frontend_url_path=PANEL_URL_PATH,
+        config={
+            # version прокидывается в панель через this.panel.config.version.
+            "version": version,
+            "_panel_custom": {
+                "name": "sboom-panel",
+                "module_url": f"{PANEL_STATIC_PATH}/sboom-panel.js?v={version}",
+            },
+        },
+        require_admin=False,
+    )
+    hass.data[marker] = True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> bool:

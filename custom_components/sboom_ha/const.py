@@ -6,6 +6,10 @@ DEFAULT_NAME = "SberBoom"
 DEFAULT_PORT = 20000
 DEFAULT_USER_AGENT = "WebSocket++/0.8.2"
 
+# Встроенная панель управления (frontend): раздача www/ + built-in panel.
+PANEL_URL_PATH = "sboom"
+PANEL_STATIC_PATH = "/sboom_panel"
+
 # Config entry keys
 CONF_HOST = "host"
 CONF_PORT = "port"
@@ -142,6 +146,7 @@ OPT_LYRICS_ENABLED = "lyrics_enabled"                  # bool, default True
 OPT_LYRICS_OFFSET = "lyrics_offset"                    # сек, сдвиг лирики, default 0.0
 OPT_LYRICS_NETEASE = "lyrics_netease_fallback"         # bool: NetEase как резерв, default True
 OPT_KARAOKE_FILL = "karaoke_fill"                      # bool: посимвольная закраска строки, default False
+OPT_PANEL_ENABLED = "panel_enabled"                    # bool: встроенная панель плеера в боковом меню, default True
 
 # Караоке-стрим: интервал кадров при активном воспроизведении (5 FPS —
 # достижимо после кэширования blur-фона и шрифтов; JPEG-encode 720p ~10-20 мс).
@@ -158,3 +163,4 @@ DEFAULT_LYRICS_ENABLED = True
 DEFAULT_LYRICS_OFFSET = 0.0
 DEFAULT_LYRICS_NETEASE = True
 DEFAULT_KARAOKE_FILL = False  # по умолчанию статичная строка (закраска — опционально)
+DEFAULT_PANEL_ENABLED = True  # панель плеера включена по умолчанию

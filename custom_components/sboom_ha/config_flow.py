@@ -45,6 +45,7 @@ from .const import (
     DEFAULT_LYRICS_NETEASE,
     DEFAULT_LYRICS_OFFSET,
     DEFAULT_NAME,
+    DEFAULT_PANEL_ENABLED,
     DEFAULT_PORT,
     DEFAULT_VOLUME_POLL_INTERVAL,
     DOMAIN,
@@ -58,6 +59,7 @@ from .const import (
     OPT_LYRICS_ENABLED,
     OPT_LYRICS_NETEASE,
     OPT_LYRICS_OFFSET,
+    OPT_PANEL_ENABLED,
     OPT_VOLUME_POLL_INTERVAL,
     PAIR_BUTTON_TIMEOUT_SEC,
 )
@@ -142,6 +144,10 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         OPT_KARAOKE_FILL,
                         default=opts.get(OPT_KARAOKE_FILL, DEFAULT_KARAOKE_FILL),
+                    ): bool,
+                    vol.Optional(
+                        OPT_PANEL_ENABLED,
+                        default=opts.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED),
                     ): bool,
                 }
             ),

@@ -13,14 +13,19 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
+from ._deeplink import play_deeplink
 from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN
 from .coordinator import SboomCoordinator
+from .zvuk_client import ZvukClient
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_REFRESH_METADATA = "refresh_metadata"
 SERVICE_REAUTH = "reauth"
 SERVICE_BT_DEVICE = "bluetooth_device"
+SERVICE_PLAY_MUSIC = "play_music"
+
+_ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
 
 _BT_CMD_MAP = {
     "connect": BT_CMD_CONNECT,
@@ -40,6 +45,19 @@ SCHEMA_BT_DEVICE = vol.Schema(
         **_TARGET_SCHEMA,
         vol.Required("mac_address"): str,
         vol.Required("command"): vol.In(sorted(_BT_CMD_MAP)),
+    }
+)
+# play_music: один из источников — url (zvuk.com/... или готовый staros://),
+# id (+ kind), или query (поиск по названию в Звуке).
+SCHEMA_PLAY_MUSIC = vol.Schema(
+    {
+        **_TARGET_SCHEMA,
+        vol.Optional("url"): str,
+        vol.Optional("query"): str,
+        vol.Optional("id"): str,
+        vol.Optional("kind"): vol.In(
+            ["track", "artist", "release", "playlist", "podcast", "abook"]
+        ),
     }
 )
 
@@ -105,6 +123,57 @@ async def _handle_bt_device(hass: HomeAssistant, call: ServiceCall) -> None:
         await coord.client.bt_device_command(mac, cmd)
 
 
+def _zvuk_client(hass: HomeAssistant) -> ZvukClient:
+    """Единственный кешированный ZvukClient (общий с websocket_api)."""
+    client: ZvukClient | None = hass.data.get(_ZVUK_CLIENT_KEY)
+    if client is None:
+        client = ZvukClient()
+        hass.data[_ZVUK_CLIENT_KEY] = client
+    return client
+
+
+async def _resolve_deeplink(hass: HomeAssistant, data: dict) -> str:
+    """url / id+kind / query → staros://music-deeplink."""
+    url = data.get("url")
+    if url:
+        if url.startswith("staros://"):
+            return url  # готовый deeplink
+        parsed = ZvukClient.parse_zvuk_url(url, None)
+        if not parsed:
+            raise ServiceValidationError(f"не удалось разобрать Звук-URL: {url}")
+        return ZvukClient.build_deeplink(*parsed)
+
+    if data.get("id"):
+        parsed = ZvukClient.parse_zvuk_url(data["id"], data.get("kind"))
+        if not parsed:
+            raise ServiceValidationError(
+                "для id укажите kind (track/artist/release/playlist/podcast)"
+            )
+        return ZvukClient.build_deeplink(*parsed)
+
+    query = data.get("query")
+    if query:
+        deeplink = await _zvuk_client(hass).search_first_deeplink(query)
+        if deeplink:
+            return deeplink
+        raise ServiceValidationError(
+            f"Звук: по запросу «{query}» ничего не найдено (или поиск недоступен)"
+        )
+
+    raise ServiceValidationError(
+        "play_music: укажите один из источников — url, id или query"
+    )
+
+
+async def _handle_play_music(hass: HomeAssistant, call: ServiceCall) -> None:
+    deeplink = await _resolve_deeplink(hass, call.data)
+    for coord in _coords_from_call(hass, call):
+        if not await play_deeplink(coord.client, deeplink):
+            raise ServiceValidationError(
+                f"колонка отклонила deeplink: {deeplink}"
+            )
+
+
 def async_register_services(hass: HomeAssistant) -> None:
     """Регистрация служб (однократно, из async_setup)."""
     if hass.services.has_service(DOMAIN, SERVICE_REFRESH_METADATA):
@@ -119,6 +188,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _bt_device_handler(call: ServiceCall) -> None:
         await _handle_bt_device(hass, call)
 
+    async def _play_music_handler(call: ServiceCall) -> None:
+        await _handle_play_music(hass, call)
+
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH_METADATA, _refresh_handler, schema=SCHEMA_REFRESH_METADATA
     )
@@ -127,4 +199,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_BT_DEVICE, _bt_device_handler, schema=SCHEMA_BT_DEVICE
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_PLAY_MUSIC, _play_music_handler, schema=SCHEMA_PLAY_MUSIC
     )
