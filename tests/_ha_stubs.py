@@ -1012,3 +1012,61 @@ def install_stubs() -> None:
         SystemHealthRegistration=_SystemHealthRegistration,
         async_check_can_reach_url=_async_check_can_reach_url,
     )
+
+    # ── frontend / http / websocket_api / loader (встроенная панель) ─────────
+    def _async_register_built_in_panel(*_a, **_k):
+        return None
+
+    def _async_remove_panel(*_a, **_k):
+        return None
+
+    _make_module(
+        "homeassistant.components.frontend",
+        async_register_built_in_panel=_async_register_built_in_panel,
+        async_remove_panel=_async_remove_panel,
+    )
+
+    class _StaticPathConfig:
+        def __init__(self, url_path, path, cache_headers=True):
+            self.url_path = url_path
+            self.path = path
+            self.cache_headers = cache_headers
+
+    _make_module(
+        "homeassistant.components.http", StaticPathConfig=_StaticPathConfig
+    )
+
+    def _ws_command(_schema):
+        def _deco(func):
+            return func
+
+        return _deco
+
+    def _ws_async_response(func):
+        return func
+
+    def _ws_register_command(_hass, _command):
+        return None
+
+    class _ActiveConnection:  # только для аннотаций (runtime не используется)
+        pass
+
+    ws_mod = _make_module(
+        "homeassistant.components.websocket_api",
+        websocket_command=_ws_command,
+        async_response=_ws_async_response,
+        async_register_command=_ws_register_command,
+        ActiveConnection=_ActiveConnection,
+    )
+    # `from homeassistant.components import websocket_api` требует атрибут пакета
+    sys.modules["homeassistant.components"].websocket_api = ws_mod
+
+    class _Integration:
+        version = "0.0.0-test"
+
+    async def _async_get_integration(_hass, _domain):
+        return _Integration()
+
+    _make_module(
+        "homeassistant.loader", async_get_integration=_async_get_integration
+    )

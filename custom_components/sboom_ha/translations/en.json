@@ -78,7 +78,8 @@
           "lyrics_enabled": "Fetch synced lyrics from Lrclib.net",
           "lyrics_netease_fallback": "Use NetEase as a fallback lyrics source",
           "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)",
-          "karaoke_fill": "Karaoke fill (highlight the line as it is sung)"
+          "karaoke_fill": "Karaoke fill (highlight the line as it is sung)",
+          "panel_enabled": "Show the player panel in the sidebar"
         }
       }
     }
@@ -315,6 +316,32 @@
         "command": {
           "name": "Command",
           "description": "Action to perform."
+        }
+      }
+    },
+    "play_music": {
+      "name": "Play music",
+      "description": "Play content on the speaker by a zvuk.com link, a search query, or id + kind.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "SberBoom speaker (defaults to all configured)."
+        },
+        "url": {
+          "name": "Link",
+          "description": "zvuk.com link (e.g. https://zvuk.com/track/84279897)."
+        },
+        "query": {
+          "name": "Query",
+          "description": "Search query — the first matching result is played."
+        },
+        "id": {
+          "name": "ID",
+          "description": "Catalog content id (used together with Kind)."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Content kind for id: track / artist / release / playlist / podcast / abook."
         }
       }
     }
