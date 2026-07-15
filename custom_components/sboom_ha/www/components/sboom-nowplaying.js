@@ -410,4 +410,5 @@ class SboomNowPlaying extends LitElement {
   }
 }
 
-customElements.define("sboom-nowplaying", SboomNowPlaying);
+if (!customElements.get("sboom-nowplaying"))
+  customElements.define("sboom-nowplaying", SboomNowPlaying);

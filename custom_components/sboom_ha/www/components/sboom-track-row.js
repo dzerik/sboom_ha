@@ -365,4 +365,5 @@ class SboomTrackRow extends LitElement {
   }
 }
 
-customElements.define("sboom-track-row", SboomTrackRow);
+if (!customElements.get("sboom-track-row"))
+  customElements.define("sboom-track-row", SboomTrackRow);

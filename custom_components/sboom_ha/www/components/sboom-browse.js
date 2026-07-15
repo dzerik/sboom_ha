@@ -1131,4 +1131,5 @@ class SboomBrowse extends LitElement {
   }
 }
 
-customElements.define("sboom-browse", SboomBrowse);
+if (!customElements.get("sboom-browse"))
+  customElements.define("sboom-browse", SboomBrowse);

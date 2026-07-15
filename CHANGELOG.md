@@ -4,6 +4,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [0.35.2]
+
+### Fixed
+- **Ошибка `customElements.define … "sboom-nowplaying" has already been used`** при открытии панели, когда на дашборде используется карточка `sboom-card`. Карточка импортирует общие компоненты без `?v`, панель — с `?v=<версия>`; разные URL заставляли браузер выполнять модуль дважды, а незащищённый `define` падал. Все shared-компоненты (`sboom-nowplaying`, `sboom-controls`, `sboom-browse`, `sboom-track-row`) теперь регистрируются идемпотентно (`if (!customElements.get(...))`), как `sboom-toast`/`sboom-tile` — двойная загрузка безопасна.
+
 ## [0.35.1]
 
 ### Changed

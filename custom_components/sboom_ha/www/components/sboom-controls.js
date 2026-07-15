@@ -450,4 +450,5 @@ class SboomControls extends LitElement {
   }
 }
 
-customElements.define("sboom-controls", SboomControls);
+if (!customElements.get("sboom-controls"))
+  customElements.define("sboom-controls", SboomControls);
