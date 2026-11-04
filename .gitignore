@@ -33,3 +33,8 @@ research/fw_snapshots/
 
 # живые дампы состояния колонки (приватные значения)
 research/state_dump/
+
+/AGENTS.md
+/.codex-import/
+/.codex/
+/.agents/

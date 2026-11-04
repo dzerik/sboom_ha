@@ -12,6 +12,7 @@
 - **[`STAROS_PROTOBUF.md`](STAROS_PROTOBUF.md)** — справочник protobuf-схемы StarOS: op-коды, каталог сообщений `ru.sber.staros.protobuf`, feature-флаги устройств.
 - **[`STATE_SCHEMA.md`](STATE_SCHEMA.md)** — схема JSON-payload'ов GET_STATE (`op12`), GET_META_DATA (`op10`), GET_PLAYING_QUEUE (`op17`).
 - **[`RESUME_BY_AI_PROTOCOL.md`](RESUME_BY_AI_PROTOCOL.md)** — высокоуровневое описание TLV-транспорта для новых разработчиков.
+- **[`SBOOM_NODE_COMPARISON.md`](SBOOM_NODE_COMPARISON.md)** — сравнение всех возможностей `sergvax/sboom_node` с интеграцией: что уже реализовано, что можно перенести и какие ограничения есть у Bluetooth и программного мультирума.
 
 ### 📦 Реконструированные `.proto` справочники
 
