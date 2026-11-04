@@ -1,6 +1,8 @@
 """Тесты custom services: refresh_metadata, reauth."""
+
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,12 +17,82 @@ from tests._fakes import build_coordinator, make_state, make_track
 from tests._ha_stubs import HomeAssistant, ServiceCall
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_id", ["alice", None])
+async def test_play_music_records_one_launch_for_multiple_targets(monkeypatch, user_id):
+    from sboom_ha import services
+    from sboom_ha.play_history import async_get_play_history
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+    monkeypatch.setattr(services, "_coords_from_call", lambda hass, call: [coord, coord])
+    monkeypatch.setattr(services, "play_deeplink", AsyncMock(return_value=True))
+    call = ServiceCall(data={"url": "staros://music?tid=55&pt=track"})
+    if user_id:
+        call.context = SimpleNamespace(user_id=user_id)
+    await services._handle_play_music(coord.hass, call)
+    history = await async_get_play_history(coord.hass)
+    items = await history.async_list(user_id or "system")
+    assert [(item["id"], item["count"]) for item in items] == [("55", 1)]
+    if user_id:
+        assert await history.async_list("system") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [False, TimeoutError("offline")])
+async def test_failed_play_music_does_not_enter_history(monkeypatch, result):
+    from homeassistant.exceptions import HomeAssistantError
+    from sboom_ha import services
+    from sboom_ha.play_history import async_get_play_history
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+    if isinstance(result, Exception):
+        play = AsyncMock(side_effect=result)
+    else:
+        play = AsyncMock(return_value=result)
+    monkeypatch.setattr(services, "play_deeplink", play)
+    call = ServiceCall(data={"url": "staros://music?tid=55&pt=track"})
+    with pytest.raises(HomeAssistantError):
+        await services._handle_play_music(coord.hass, call)
+    assert await (await async_get_play_history(coord.hass)).async_list("system") == []
+
+
+@pytest.mark.asyncio
+async def test_play_music_preserves_accepted_launch_before_later_target_failure(monkeypatch):
+    from homeassistant.exceptions import HomeAssistantError
+    from sboom_ha import services
+    from sboom_ha.play_history import async_get_play_history
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+    monkeypatch.setattr(services, "_coords_from_call", lambda hass, call: [coord, coord])
+    monkeypatch.setattr(services, "play_deeplink", AsyncMock(side_effect=[True, False]))
+    call = ServiceCall(data={"url": "staros://music?tid=55&pt=track"})
+    with pytest.raises(HomeAssistantError):
+        await services._handle_play_music(coord.hass, call)
+    items = await (await async_get_play_history(coord.hass)).async_list("system")
+    assert [(item["id"], item["count"]) for item in items] == [("55", 1)]
+
+
+@pytest.mark.asyncio
+async def test_play_music_remains_successful_when_history_save_fails(monkeypatch):
+    from sboom_ha import services
+    from sboom_ha.play_history import async_get_play_history
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+    history = await async_get_play_history(coord.hass)
+    monkeypatch.setattr(history._store, "async_save", AsyncMock(side_effect=OSError("disk full")))
+    monkeypatch.setattr(services, "play_deeplink", AsyncMock(return_value=True))
+    call = ServiceCall(data={"url": "staros://music?tid=55&pt=track"})
+    assert await services._handle_play_music(coord.hass, call) is None
+    assert await history.async_list("system") == []
+
+
 def _setup_hass_with_coord(coord) -> HomeAssistant:
     # build_coordinator уже прописал entry.runtime_data и config_entries.
     return coord.hass
 
 
 # ─────────────────── registration ───────────────────
+
 
 def test_register_services_idempotent():
     hass = HomeAssistant()
@@ -33,6 +105,7 @@ def test_register_services_idempotent():
 
 
 # ─────────────────── refresh_metadata ───────────────────
+
 
 @pytest.mark.asyncio
 async def test_refresh_metadata_calls_request_refresh_on_all_when_no_target():
@@ -75,6 +148,7 @@ async def test_service_call_without_loaded_entries_raises_validation_error():
 
 
 # ─────────────────── reauth ───────────────────
+
 
 @pytest.mark.asyncio
 async def test_reauth_triggers_async_start_reauth():

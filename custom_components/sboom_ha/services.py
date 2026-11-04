@@ -17,6 +17,7 @@ from ._deeplink import play_deeplink
 from ._ha_helpers import get_zvuk_client, iter_coordinators
 from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN
 from .coordinator import SboomCoordinator
+from .play_history import async_record_play
 from .zvuk_client import ZvukClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -159,6 +160,7 @@ async def _resolve_deeplink(hass: HomeAssistant, data: dict) -> str:
 
 async def _handle_play_music(hass: HomeAssistant, call: ServiceCall) -> None:
     deeplink = await _resolve_deeplink(hass, call.data)
+    recorded = False
     for coord in _coords_from_call(hass, call):
         try:
             accepted = await play_deeplink(coord.client, deeplink)
@@ -170,6 +172,10 @@ async def _handle_play_music(hass: HomeAssistant, call: ServiceCall) -> None:
             raise ServiceValidationError(
                 f"колонка отклонила deeplink: {deeplink}"
             )
+        if not recorded:
+            context = getattr(call, "context", None)
+            await async_record_play(hass, getattr(context, "user_id", None), deeplink)
+            recorded = True
 
 
 def async_register_services(hass: HomeAssistant) -> None:

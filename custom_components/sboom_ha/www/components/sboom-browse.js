@@ -21,6 +21,8 @@
  */
 
 import { LitElement, html, css, nothing } from "../lit-base.js";
+const _historyVersion = new URL(import.meta.url).searchParams.get("v");
+await import(`./sboom-history.js${_historyVersion ? `?v=${_historyVersion}` : ""}`);
 // Примитивы sboom-track-row / sboom-tile прелоадятся host'ом (sboom-panel.js)
 // с cache-bust ?v — здесь используем только теги (регистрируются глобально).
 
@@ -40,6 +42,7 @@ class SboomBrowse extends LitElement {
       _queueLoading: { type: Boolean, state: true },
       _navLoading: { type: Boolean, state: true },
       _pendingId: { type: String, state: true },
+      _historyRevision: { type: Number, state: true },
     };
   }
 
@@ -61,6 +64,7 @@ class SboomBrowse extends LitElement {
     this._pendingTimer = null;
     this._lastPlayId = null; // дедуп двойных play-команд
     this._lastPlayAt = 0;
+    this._historyRevision = 0;
   }
 
   connectedCallback() {
@@ -81,7 +85,9 @@ class SboomBrowse extends LitElement {
     // ре-рендера). Если изменился ТОЛЬКО hass — не ре-рендерим (иначе списки
     // пересобираются вхолостую и «съедают» тапы). Первый приход hass (пока
     // очередь не загружена) пропускаем — он нужен для стартовой загрузки.
-    if (changed.size === 1 && changed.has("hass")) return !this._queueFetched;
+    if (changed.size === 1 && changed.has("hass")) {
+      return !this._queueFetched || changed.get("hass")?.user?.id !== this.hass?.user?.id;
+    }
     return true;
   }
 
@@ -296,7 +302,7 @@ class SboomBrowse extends LitElement {
       this._pendingId = null;
     }, 25000);
     this._toast(track.title ? `Запускаю «${track.title}»…` : "Запускаю…", "info");
-    await this._play(contentId, track.pt || "track", true);
+    await this._play(contentId, track.pt || "track", true, track);
   }
 
   _onTileOpen(item) {
@@ -308,10 +314,10 @@ class SboomBrowse extends LitElement {
         this._drillAlbum(item);
         break;
       case "playlist":
-        this._play(String(item.id), item.pt || "playlist");
+        this._play(String(item.id), item.pt || "playlist", false, item);
         break;
       default:
-        this._play(String(item.id), item.pt || "track");
+        this._play(String(item.id), item.pt || "track", false, item);
     }
   }
 
@@ -347,16 +353,22 @@ class SboomBrowse extends LitElement {
     }
   }
 
-  async _play(contentId, pt, silent) {
+  _onHistoryPlay(event) {
+    const item = event.detail;
+    if (item?.id && item?.kind) this._play(String(item.id), item.kind, false, item);
+  }
+
+  async _play(contentId, pt, silent, item = {}) {
     // Дедуп: один пользовательский клик может породить 2 события (pointer/
     // click + ре-рендер) — не шлём одинаковую play-команду дважды за 2с,
     // иначе колонка получает бэклог deeplink'ов.
     const now = Date.now();
-    if (this._lastPlayId === contentId && now - this._lastPlayAt < 2000) {
+    const playKey = `${this.entryId}:${pt || "track"}:${contentId}`;
+    if (this._lastPlayId === playKey && now - this._lastPlayAt < 2000) {
       console.info("[sboom] _play DEDUPED", contentId);
       return;
     }
-    this._lastPlayId = contentId;
+    this._lastPlayId = playKey;
     this._lastPlayAt = now;
     console.info("[sboom] browse _play → WS", { contentId, pt: pt || "track", entry_id: this.entryId, hasHass: !!this.hass });
     if (!this.hass || !contentId) {
@@ -364,15 +376,26 @@ class SboomBrowse extends LitElement {
       return;
     }
     try {
+      const artists = Array.isArray(item.artists) ? item.artists
+        .map((artist) => typeof artist === "string" ? artist : artist?.title || artist?.name || "")
+        .filter(Boolean).join(", ") : "";
       const res = await this.hass.callWS({
         type: "sboom/play",
         content_id: contentId,
         pt: pt || "track",
         entry_id: this.entryId,
+        history_item: {
+          title: String(item.title || contentId).slice(0, 512),
+          subtitle: String(item.subtitle || item.artist || artists).slice(0, 512),
+          ...(item.cover_url ? { cover_url: String(item.cover_url).slice(0, 2048) } : {}),
+        },
       });
+      if (!res?.success) throw new Error("Колонка не подтвердила запуск");
+      this._historyRevision += 1;
       console.info("[sboom] _play WS result", res);
       if (!silent) this._toast("Запущено", "success");
     } catch (err) {
+      this._lastPlayId = null;
       console.error("[sboom] _play WS error", err);
       this._toast(`Ошибка: ${err.message || err}`, "error");
     }
@@ -507,6 +530,31 @@ class SboomBrowse extends LitElement {
         gap: 8px;
         margin-top: 12px;
       }
+      .section-tabs {
+        display: flex;
+        gap: 8px;
+        padding: 16px 0 12px;
+      }
+      .section-tab {
+        border: 1px solid var(--sb-line);
+        border-radius: var(--sb-radius-sm);
+        background: transparent;
+        color: var(--sb-ink-dim);
+        padding: 8px 14px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .section-tab[aria-pressed="true"] {
+        color: var(--sb-ink);
+        background: var(--sb-elev-2);
+        border-color: var(--sb-accent);
+      }
+      .section-tab:focus-visible {
+        outline: 2px solid var(--sb-accent);
+        outline-offset: 3px;
+      }
+      .section-tab:disabled { opacity: .45; cursor: default; }
       .back {
         display: inline-flex;
         align-items: center;
@@ -970,7 +1018,7 @@ class SboomBrowse extends LitElement {
           <h1 class="entity-name">${data.title || "—"}</h1>
           <button
             class="play-pill"
-            @click=${() => this._play(String(data.id), "artist")}
+            @click=${() => this._play(String(data.id), "artist", false, data)}
             aria-label="Слушать исполнителя"
           >
             ${this._playIcon()} Слушать
@@ -1023,7 +1071,7 @@ class SboomBrowse extends LitElement {
           ${sub ? html`<div class="entity-sub">${sub}</div>` : nothing}
           <button
             class="play-pill"
-            @click=${() => this._play(String(data.id), "release")}
+            @click=${() => this._play(String(data.id), "release", false, data)}
             aria-label="Слушать альбом"
           >
             ${this._playIcon()} Слушать
@@ -1049,6 +1097,10 @@ class SboomBrowse extends LitElement {
     if (v.kind === "search") return this._renderSearch(v);
     if (v.kind === "artist") return this._renderArtist(v.data || {});
     if (v.kind === "album") return this._renderAlbum(v.data || {});
+    if (v.kind === "history") return html`<sboom-history
+      .hass=${this.hass} .entryId=${this.entryId} .refreshToken=${this._historyRevision}
+      @history-play=${this._onHistoryPlay}
+    ></sboom-history>`;
     return this._renderQueue();
   }
 
@@ -1106,6 +1158,15 @@ class SboomBrowse extends LitElement {
               </button>`
             : nothing}
         </form>
+
+        <div class="section-tabs" role="group" aria-label="Раздел каталога">
+          <button class="section-tab" aria-pressed=${String(this._active.kind === "queue")}
+            ?disabled=${!this.entryId}
+            @click=${() => { this._stack = [{ kind: "queue" }]; this._query = ""; this._fetchQueue(); }}>Очередь</button>
+          <button class="section-tab" aria-pressed=${String(this._active.kind === "history")}
+            ?disabled=${!this.entryId}
+            @click=${() => { this._stack = [{ kind: "history" }]; this._query = ""; }}>История</button>
+        </div>
 
         ${drilled
           ? html`<div class="nav">

@@ -16,6 +16,9 @@ import colorsys
 import io
 import logging
 import re
+from collections import OrderedDict
+from copy import deepcopy
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -33,6 +36,28 @@ _BROWSER_UA = (
 )
 _TIMEOUT = 10.0
 _COVER_SIZE = "400x400"
+_REQUEST_TIMEOUT = 12.0
+_SEARCH_TIMEOUT = 15.0
+_SEARCH_FRESH = 60.0
+_SEARCH_STALE = 15 * 60.0
+_SEARCH_CACHE_MAX = 64
+_TRANSIENT_STATUS = {429, 502, 503, 504}
+
+_SEARCH_QUERY = """
+query search($query: String, $limit: Int = 8) {
+  search(query: $query) {
+    tracks(limit: $limit) {
+      items { id title duration explicit artists { id title }
+        release { id title image { src } } }
+    }
+    playlists(limit: $limit) { items { id title image { src } } }
+    artists(limit: $limit) { items { id title image { src } } }
+    releases(limit: $limit) {
+      items { id title image { src } artists { id title } }
+    }
+  }
+}
+"""
 
 # getTracks — ПРОВЕРЕНО вживую.
 _GET_TRACKS_QUERY = (
@@ -154,6 +179,12 @@ class ZvukClient:
         self._token: str | None = None
         self._client: httpx.AsyncClient | None = None
         self._color_cache: dict[str, str | None] = {}
+        self._token_lock = asyncio.Lock()
+        # Fixed stripes bound bookkeeping without serializing unrelated queries.
+        self._search_locks = tuple(asyncio.Lock() for _ in range(16))
+        self._search_cache: OrderedDict[tuple[str, int], tuple[float, dict[str, Any]]] = (
+            OrderedDict()
+        )
 
     def _http(self) -> httpx.AsyncClient:
         """Лениво создать общий httpx-клиент с cookie-jar и браузерным UA."""
@@ -172,44 +203,79 @@ class ZvukClient:
             self._client = None
 
     async def get_token(self, *, force: bool = False) -> str:
-        """Вернуть анонимный токен, кешируя его в инстансе.
-
-        `force=True` — принудительно обновить (например, после 401).
-        """
+        """Вернуть анонимный токен; сериализовать получение общего cookie/token."""
         if self._token and not force:
             return self._token
-        resp = await self._http().get(PROFILE_URL)
-        resp.raise_for_status()
-        data = resp.json()
-        token = (data.get("result") or {}).get("token")
-        if not isinstance(token, str) or not token:
-            raise ValueError("Звук: токен не найден в /profile")
-        self._token = token
-        return token
+        async with self._token_lock:
+            if self._token and not force:
+                return self._token
+            resp = await self._request("GET", PROFILE_URL)
+            data = resp.json()
+            result = data.get("result") if isinstance(data, dict) else None
+            token = result.get("token") if isinstance(result, dict) else None
+            if not isinstance(token, str) or not token:
+                raise ValueError("Звук: токен не найден в /profile")
+            self._token = token
+            return token
 
-    async def _graphql(
-        self, query: str, variables: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Выполнить GraphQL-запрос с X-Auth-Token. Вернуть блок `data`.
-
-        401 (протух кэшированный анонимный токен) → один retry со свежим
-        токеном; без этого поиск был бы мёртв до рестарта HA.
-        """
-        token = await self.get_token()
-        payload = {"query": query, "variables": variables}
-        resp = await self._http().post(
-            GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
+    @staticmethod
+    def _transient(exc: BaseException) -> bool:
+        """Only explicitly recoverable failures may use stale search results."""
+        return isinstance(exc, (httpx.RequestError, TimeoutError)) or (
+            isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in _TRANSIENT_STATUS
         )
-        if resp.status_code == 401:
-            token = await self.get_token(force=True)
-            resp = await self._http().post(
-                GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
-            )
-        resp.raise_for_status()
+
+    async def _request(
+        self, method: str, url: str, *, auth: bool = False, **kwargs: Any
+    ) -> httpx.Response:
+        """Read-only catalogue request: at most three attempts, bounded wall time."""
+        try:
+            async with asyncio.timeout(_REQUEST_TIMEOUT):
+                token = await self.get_token() if auth else None
+                refreshed = False
+                for attempt in range(3):
+                    try:
+                        headers = {"X-Auth-Token": token} if token else {}
+                        resp = await self._http().request(method, url, headers=headers, **kwargs)
+                        if resp.status_code == 401 and auth and not refreshed:
+                            refreshed = True
+                            # Another concurrent request may already have refreshed it.
+                            if token == self._token:
+                                token = await self.get_token(force=True)
+                            else:
+                                token = self._token
+                            if attempt < 2:
+                                continue
+                        resp.raise_for_status()
+                        return resp
+                    except httpx.HTTPError as exc:
+                        if not self._transient(exc) or attempt == 2:
+                            raise
+                    await asyncio.sleep(0.1 * 2**attempt)
+        except TimeoutError as exc:
+            # Preserve the existing public httpx error contract for drill-down.
+            raise httpx.ReadTimeout("Звук: превышено время запроса") from exc
+        raise RuntimeError("Звук: исчерпаны попытки запроса")
+
+    async def _graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        """Выполнить read-only GraphQL с bounded retry и одним refresh401."""
+        resp = await self._request(
+            "POST",
+            GRAPHQL_URL,
+            auth=True,
+            json={"query": query, "variables": variables},
+        )
         body = resp.json()
+        if not isinstance(body, dict):
+            raise ValueError("Звук: неверный GraphQL ответ")
         if body.get("errors"):
             _LOGGER.debug("Звук GraphQL errors: %s", body["errors"])
-        return body.get("data") or {}
+            if not body.get("data"):
+                raise ValueError("Звук: ошибка GraphQL")
+        data = body.get("data") or {}
+        if not isinstance(data, dict):
+            raise ValueError("Звук: неверный GraphQL data")
+        return data
 
     async def get_tracks(self, ids: list[str]) -> list[dict[str, Any]]:
         """Метаданные треков по каталожным id. Вернуть нормализованные dict'ы."""
@@ -419,62 +485,180 @@ class ZvukClient:
             return bytes(buf)
 
     async def search(self, query: str, limit: int = 8) -> dict[str, Any]:
-        """Поиск по каталогу Звука — ПРОВЕРЕНО вживую (REST /api/tiny/search).
+        """REST + GraphQL search with copied 60s fresh / 15min transient stale LRU.
 
-        Возвращает категоризированный результат для панели::
-
-            {
-              "best": {"type": "track", "id": "84279911"} | None,
-              "artists":   [item, ...],
-              "releases":  [item, ...],   # альбомы
-              "tracks":    [item, ...],
-              "playlists": [item, ...],
-            }
-
-        item = {id, type, title, subtitle, cover_url, pt, explicit, duration}.
-        Обложки добираются batch-запросами getArtists/getReleases/getTracks
-        (best-effort — при ошибке просто без обложки).
+        The public shape stays {best, artists, releases, tracks, playlists}.
+        One total deadline includes lock wait, token, retries and cover enrichment.
         """
-        if not query.strip():
+        query = query.strip()
+        if not query:
             return self._empty_search()
-        types = ",".join(cat[0] for cat in _SEARCH_CATEGORIES)
+        limit = max(1, min(int(limit), 100))
+        key = (query, limit)
+        # No await: a fresh hit need not wait for an unrelated colliding stripe.
+        cached = self._search_cache.get(key)
+        if cached and monotonic() - cached[0] < _SEARCH_FRESH:
+            self._search_cache.move_to_end(key)
+            return deepcopy(cached[1])
+        out: dict[str, Any] | None = None
+        source_tasks: list[asyncio.Task] = []
         try:
-            # get_token внутри try: недоступность zvuk.com на этапе токена —
-            # тоже «ошибка → пустой результат», а не сырое исключение.
-            token = await self.get_token()
-            resp = await self._http().get(
-                SEARCH_URL,
-                params={"query": query, "type": types, "limit": limit},
-                headers={"X-Auth-Token": token},
-            )
-            if resp.status_code == 401:
-                # Протух анонимный токен → один retry со свежим (см. _graphql).
-                token = await self.get_token(force=True)
-                resp = await self._http().get(
+            async with asyncio.timeout(_SEARCH_TIMEOUT):
+                async with self._search_locks[hash(key) % len(self._search_locks)]:
+                    cached = self._search_cache.get(key)
+                    if cached and monotonic() - cached[0] < _SEARCH_FRESH:
+                        self._search_cache.move_to_end(key)
+                        return deepcopy(cached[1])
+                    async with asyncio.TaskGroup() as group:
+                        rest = group.create_task(self._search_source(query, limit, False))
+                        gql = group.create_task(self._search_source(query, limit, True))
+                        source_tasks = [rest, gql]
+                    sources = [rest.result(), gql.result()]
+                    results = [result for result, _ in sources if result is not None]
+                    if not results:
+                        if all(self._transient(exc) for _, exc in sources):
+                            return self._stale_search(key)
+                        return self._empty_search()
+                    out = self._merge_search(results, limit)
+                    await self._enrich_search_covers(out)
+                    self._cache_search(key, out)
+                    return out
+        except TimeoutError:
+            # TaskGroup has cancelled and joined unfinished providers. A completed
+            # provider remains useful even when its sibling exceeded the deadline.
+            completed = [task.result() for task in source_tasks if not task.cancelled()]
+            results = [result for result, _ in completed if result is not None]
+            if out is None and results:
+                out = self._merge_search(results, limit)
+            if out is not None:
+                # Enrichment and the other provider cannot erase already found music.
+                self._cache_search(key, out)
+                return out
+            if any(not self._transient(exc) for _, exc in completed):
+                return self._empty_search()
+            return self._stale_search(key)
+
+    def _cache_search(self, key: tuple[str, int], out: dict[str, Any]) -> None:
+        """Atomic, non-awaiting LRU update; store a private copy of a success."""
+        self._search_cache[key] = (monotonic(), deepcopy(out))
+        self._search_cache.move_to_end(key)
+        while len(self._search_cache) > _SEARCH_CACHE_MAX:
+            self._search_cache.popitem(last=False)
+
+    def _stale_search(self, key: tuple[str, int]) -> dict[str, Any]:
+        """Return a copy only while the last success is within the stale window."""
+        cached = self._search_cache.get(key)
+        if cached and monotonic() - cached[0] < _SEARCH_STALE:
+            self._search_cache.move_to_end(key)
+            return deepcopy(cached[1])
+        return self._empty_search()
+
+    async def _search_source(
+        self, query: str, limit: int, graphql: bool
+    ) -> tuple[dict[str, Any] | None, BaseException | None]:
+        """Keep expected provider failures distinct from valid empty results."""
+        try:
+            if graphql:
+                data = await self._graphql(_SEARCH_QUERY, {"query": query, "limit": limit})
+                raw = data.get("search")
+            else:
+                resp = await self._request(
+                    "GET",
                     SEARCH_URL,
-                    params={"query": query, "type": types, "limit": limit},
-                    headers={"X-Auth-Token": token},
+                    auth=True,
+                    params={
+                        "query": query,
+                        "type": ",".join(cat[0] for cat in _SEARCH_CATEGORIES),
+                        "limit": limit,
+                    },
                 )
-            resp.raise_for_status()
-            search = ((resp.json() or {}).get("result") or {}).get("search") or {}
-        except (httpx.HTTPError, ValueError, TypeError) as exc:
-            _LOGGER.debug("Звук search не удался для %r: %s", query, exc)
-            return self._empty_search()
+                body = resp.json()
+                if not isinstance(body, dict):
+                    raise ValueError("Звук: неверный REST ответ")
+                result = body.get("result")
+                raw = result.get("search") if isinstance(result, dict) else None
+            if not isinstance(raw, dict):
+                raise ValueError("Звук: отсутствует search")
+            return self._normalize_search(raw, limit, graphql), None
+        except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
+            _LOGGER.debug(
+                "Звук search %s не удался для %r: %s", "GraphQL" if graphql else "REST", query, exc
+            )
+            return None, exc
 
-        out: dict[str, Any] = self._empty_search()
-        best = search.get("best_item") or {}
-        if isinstance(best, dict) and best.get("id") and best.get("doc_type"):
+    def _normalize_search(self, raw: dict[str, Any], limit: int, graphql: bool) -> dict[str, Any]:
+        """Normalize the two catalogue schemas into existing panel items."""
+        out = self._empty_search()
+        best = raw.get("best_item")
+        kinds = {cat[0] for cat in _SEARCH_CATEGORIES}
+        if (
+            isinstance(best, dict)
+            and best.get("doc_type") in kinds
+            and isinstance(best.get("id"), (str, int))
+            and best["id"]
+        ):
             out["best"] = {"type": best["doc_type"], "id": str(best["id"])}
+        for kind, key, pt in _SEARCH_CATEGORIES:
+            section = raw.get(key)
+            items = section.get("items") if isinstance(section, dict) else []
+            if not isinstance(items, list):
+                continue
+            seen: set[str] = set()
+            for row in items:
+                if not isinstance(row, dict):
+                    continue
+                ident = row.get("id")
+                if not isinstance(ident, (str, int)) or isinstance(ident, bool) or not ident:
+                    continue
+                ident = str(ident)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                normalized = dict(row)
+                normalized["title"] = row.get("title") if isinstance(row.get("title"), str) else ""
+                if graphql:
+                    artists = row.get("artists")
+                    normalized["aname"] = (
+                        ", ".join(
+                            artist["title"]
+                            for artist in artists
+                            if isinstance(artist, dict) and isinstance(artist.get("title"), str)
+                        )
+                        if isinstance(artists, list)
+                        else None
+                    )
+                elif not isinstance(row.get("aname"), str):
+                    normalized["aname"] = None
+                item = self._search_item(normalized, kind, pt)
+                if graphql:
+                    source = row.get("release") if kind == "track" else row
+                    image = source.get("image") if isinstance(source, dict) else None
+                    item["cover_url"] = (
+                        self._cover(image.get("src")) if isinstance(image, dict) else None
+                    )
+                out[key].append(item)
+                if len(out[key]) >= limit:
+                    break
+        return out
 
-        for doc_type, key, pt in _SEARCH_CATEGORIES:
-            raw = ((search.get(key) or {}).get("items")) or []
-            out[key] = [
-                self._search_item(it, doc_type, pt)
-                for it in raw[:limit]
-                if isinstance(it, dict) and it.get("id")
-            ]
-
-        await self._enrich_search_covers(out)
+    def _merge_search(self, results: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+        """Prefer REST metadata, fill missing fields and append unique GQL items."""
+        out = self._empty_search()
+        for result in results:
+            if out["best"] is None:
+                out["best"] = result["best"]
+            for _, key, _ in _SEARCH_CATEGORIES:
+                by_id = {item["id"]: item for item in out[key]}
+                for item in result[key]:
+                    previous = by_id.get(item["id"])
+                    if previous is not None:
+                        for field in ("cover_url", "subtitle", "artist", "duration", "title"):
+                            if not previous.get(field) and item.get(field):
+                                previous[field] = item[field]
+                    elif len(out[key]) < limit:
+                        copied = dict(item)
+                        out[key].append(copied)
+                        by_id[item["id"]] = copied
         return out
 
     @staticmethod
@@ -510,8 +694,9 @@ class ZvukClient:
 
     async def _enrich_search_covers(self, out: dict[str, Any]) -> None:
         """Добрать обложки для artists/releases/tracks одним заходом (concurrent)."""
+
         async def enrich(key: str, query: str, gql_key: str) -> None:
-            items = out.get(key) or []
+            items = [it for it in out.get(key) or [] if not it.get("cover_url")]
             ids = [it["id"] for it in items]
             if not ids:
                 return
@@ -538,6 +723,7 @@ class ZvukClient:
 
     async def _enrich_track_covers(self, tracks: list[dict[str, Any]]) -> None:
         """Обложки треков через getTracks (обложка = обложка релиза)."""
+        tracks = [it for it in tracks if not it.get("cover_url")]
         ids = [it["id"] for it in tracks]
         if not ids:
             return

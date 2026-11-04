@@ -1,6 +1,7 @@
 """Тесты бинарного формата исходящих команд к колонке."""
 from __future__ import annotations
 
+import asyncio
 import struct
 
 import pytest
@@ -11,6 +12,7 @@ from sboom_ha.const import (
     OP_BT_DEVICE_COMMAND,
     OP_BT_DISCOVERABLE,
     OP_FIND_REMOTE,
+    OP_GET_SCANNED_BT,
     OP_SET_PLAYBACK_SPEED,
     OP_SET_TRACK_POS,
 )
@@ -141,3 +143,44 @@ async def test_seek_to_clamps_negative_position_to_zero():
     assert len(ws.sent) == 1
     inner = field(OP_SET_TRACK_POS, 2, field(1, 0, 0))
     assert field(5, 2, inner) in ws.sent[0]
+
+
+@pytest.mark.asyncio
+async def test_get_scanned_bt_devices_encodes_op21_and_parses_response(monkeypatch):
+    client = _make_client()
+    requests = []
+    device = field(1, 2, b"AA:BB:CC:00:11:22") + field(2, 2, b"Headphones") + field(3, 0, 200)
+    response = field(5, 2, field(21, 2, field(2, 2, device)))
+
+    async def send(envelope, msg_id, timeout):
+        requests.append((envelope, timeout))
+        return response
+
+    monkeypatch.setattr(client, "send_raw_request", send)
+    devices = await client.get_scanned_bt_devices()
+
+    assert len(requests) == 1
+    assert field(5, 2, field(OP_GET_SCANNED_BT, 2, field(1, 2, b""))) in requests[0][0]
+    assert requests[0][1] == 15
+    assert [(device.mac, device.name, device.rssi) for device in devices] == [
+        ("AA:BB:CC:00:11:22", "Headphones", 200)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_scanned_bt_timeout_cleans_pending_request(monkeypatch):
+    client = _make_client()
+    client._ws = _CapturingWS()
+    timeouts = []
+    real_wait_for = asyncio.wait_for
+
+    async def fast_timeout(awaitable, timeout):
+        timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout=0.001)
+
+    monkeypatch.setattr("sboom_ha.api.asyncio.wait_for", fast_timeout)
+    with pytest.raises(TimeoutError):
+        await client.get_scanned_bt_devices()
+
+    assert timeouts == [15]
+    assert client._pending == {}

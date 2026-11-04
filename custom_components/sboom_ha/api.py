@@ -50,6 +50,7 @@ from .const import (
     OP_GET_META_DATA,
     OP_GET_PAIRED_BT,
     OP_GET_PLAYING_QUEUE,
+    OP_GET_SCANNED_BT,
     OP_GET_STATE,
     OP_KEEP_ALIVE,
     OP_MEDIA_COMMAND,
@@ -296,6 +297,13 @@ class SberSpeakerClient:
         """op=19 — список спаренных Bluetooth-устройств колонки."""
         resp = await self._request_response(_field(OP_GET_PAIRED_BT, 2, _field(1, 2, b"")))
         return _parse_paired_bt(resp)
+
+    async def get_scanned_bt_devices(self) -> list[BluetoothDevice]:
+        """op=21 — поиск устройств с отдельным таймаутом для сканирования."""
+        resp = await self._request_response(
+            _field(OP_GET_SCANNED_BT, 2, _field(1, 2, b"")), timeout=15
+        )
+        return self.parse_scanned_bt(resp)
 
     async def bt_device_command(self, mac: str, cmd: int) -> None:
         """op=20 — команда BT-устройству по MAC.

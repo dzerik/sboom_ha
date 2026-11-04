@@ -72,6 +72,17 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
+  frontend:
+    name: Panel behavior (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test panel components
+        run: node --test tests/ui/*.test.mjs
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest

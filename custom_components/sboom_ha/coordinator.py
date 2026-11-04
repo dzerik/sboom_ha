@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,6 +22,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from ._parsers import track_from_state
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
 from .const import (
+    BT_CMD_CONNECT,
+    BT_CMD_DISCONNECT,
+    BT_CMD_REMOVE,
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
     CONF_HOST,
@@ -155,6 +159,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.state: SpeakerState | None = None
         self.track: TrackInfo | None = None
         self.paired_bt: list[BluetoothDevice] = []  # спаренные BT-устройства (op=19)
+        self.scanned_bt: list[BluetoothDevice] = []
+        self._bluetooth_lock = asyncio.Lock()
         self.connected: bool = False  # доступность колонки (для entity.available)
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
@@ -453,6 +459,54 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if action in _REFRESH_ACTIONS:
             await self.async_request_refresh()
 
+    async def async_bluetooth(self, action: str, mac: str | None = None) -> dict:
+        """Выполнить BT-команду и вернуть подтверждённый снимок колонки.
+
+        op22 лишь включает обнаружение: подтверждение сопряжения и состояние
+        питания из него не выводятся. Ошибки транспорта передаются вызывающему.
+        """
+        commands = {
+            "connect": BT_CMD_CONNECT,
+            "disconnect": BT_CMD_DISCONNECT,
+            "remove": BT_CMD_REMOVE,
+        }
+        if not isinstance(action, str) or action not in {
+            "status", "scan", "pair", *commands
+        }:
+            raise ValueError(f"unknown Bluetooth action: {action}")
+        if mac is not None or action in commands:
+            if not isinstance(mac, str) or re.fullmatch(
+                r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac
+            ) is None:
+                raise ValueError("Bluetooth action requires a valid MAC address")
+            mac = mac.upper()
+
+        async with self._bluetooth_lock:
+            # Доступность может измениться, пока запрос ожидает блокировку.
+            if not self.connected or self._stopping:
+                raise RuntimeError("speaker unavailable")
+            scanned = self.scanned_bt
+            if action == "scan":
+                scanned = await self.client.get_scanned_bt_devices()
+            elif action == "pair":
+                await self.client.bt_make_discoverable()
+            elif action in commands:
+                await self.client.bt_device_command(mac, commands[action])
+            paired = await self.client.get_paired_bt_devices()
+            self.paired_bt = paired
+            self.scanned_bt = scanned
+            self.async_update_listeners()
+            return {
+                "paired": [
+                    {"mac": device.mac, "name": device.name, "connected": device.connected}
+                    for device in paired
+                ],
+                "scanned": [
+                    {"mac": device.mac, "name": device.name, "rssi": device.rssi}
+                    for device in scanned
+                ],
+            }
+
     def _apply_optimistic_for(self, action: str, value: Any) -> None:
         """Optimistic-патч состояния после успешной команды.
 
@@ -637,7 +691,13 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as exc:
             _LOGGER.debug("get_metadata failed: %s", exc)
         try:
-            self.paired_bt = await self.client.get_paired_bt_devices()
+            # BT-команда сама перечитает paired. Пока она выполняется,
+            # пропускаем op19, чтобы scan не задерживал volume/listeners.
+            # Свободный lock берётся без await-переключения между проверкой
+            # и захватом: старый poll не перезапишет результат новой команды.
+            if not self._bluetooth_lock.locked():
+                async with self._bluetooth_lock:
+                    self.paired_bt = await self.client.get_paired_bt_devices()
         except Exception as exc:
             _LOGGER.debug("get_paired_bt_devices failed: %s", exc)
 

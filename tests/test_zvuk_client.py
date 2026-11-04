@@ -403,6 +403,9 @@ async def test_search_retries_with_fresh_token_after_401():
                 httpx.Response(200, json=empty_search),
             ]
         )
+        respx.post(GRAPHQL).mock(
+            return_value=httpx.Response(200, json={"data": {"search": {}}})
+        )
         client = ZvukClient()
         res = await client.search("Летов")
         await client.aclose()

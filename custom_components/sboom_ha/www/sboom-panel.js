@@ -22,6 +22,7 @@ await Promise.all([
   import(`./components/sboom-tile.js${_q}`),
   import(`./components/sboom-browse.js${_q}`),
   import(`./components/sboom-equalizer.js${_q}`),
+  import(`./components/sboom-bluetooth.js${_q}`),
 ]);
 
 import { html, css, nothing } from "./lit-base.js";
@@ -380,6 +381,10 @@ class SboomPanel extends SboomFeedBase {
           display: block;
           margin-top: 16px;
         }
+        sboom-bluetooth {
+          display: block;
+          margin-top: 16px;
+        }
 
         @media (max-width: 820px) {
           .wrap {
@@ -477,6 +482,11 @@ class SboomPanel extends SboomFeedBase {
             .hass=${this.hass}
             .serial=${this._serial}
           ></sboom-equalizer>
+          <sboom-bluetooth
+            .hass=${this.hass}
+            .entryId=${this._entryId}
+            .connected=${!!connected}
+          ></sboom-bluetooth>
         </section>
 
         <section class="right">

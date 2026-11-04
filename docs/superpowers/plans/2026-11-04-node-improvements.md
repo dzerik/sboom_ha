@@ -31,11 +31,11 @@
 Actions: `status`, `scan`, `pair`, `connect`, `disconnect`, `remove`.
 Result: `{paired: [{mac,name,connected}], scanned: [{mac,name,rssi}]}`.
 
-- [ ] Write failing op21 wire-format, per-scan timeout and coordinator action tests.
-- [ ] Run focused tests and observe missing method/action failures.
-- [ ] Implement request with `timeout=15`, serialized operations, validated MAC/action,
+- [x] Write failing op21 wire-format, per-scan timeout and coordinator action tests.
+- [x] Run focused tests and observe missing method/action failures.
+- [x] Implement request with `timeout=15`, serialized operations, validated MAC/action,
   reread paired after pair/device actions, publish listeners without optimistic BT facts.
-- [ ] Verify timeout recovery, two simultaneous operations and transport errors.
+- [x] Verify timeout recovery, two simultaneous operations and transport errors.
 
 ### Task 2: Persistent history
 
@@ -46,11 +46,11 @@ Result: `{paired: [{mac,name,connected}], scanned: [{mac,name,rssi}]}`.
 `async_record_play(hass,user_id,deeplink,metadata=None)` best-effort helper.
 Item: `{kind,id,title,subtitle,cover_url,count,first_played,last_played}`.
 
-- [ ] Write failing tests for user isolation, dedup/count/order, max100, reload,
+- [x] Write failing tests for user isolation, dedup/count/order, max100, reload,
   malformed storage, concurrent operations, failed save and success/failure recording.
-- [ ] Implement HA Store version1/key `sboom_ha.play_history`, lock all state mutations,
+- [x] Implement HA Store version1/key `sboom_ha.play_history`, lock all state mutations,
   await storage writes, safe deeplink parsing and successful service-call recording.
-- [ ] Verify one record per multi-target launch and no change to play result on storage error.
+- [x] Verify one record per multi-target launch and no change to play result on storage error.
 
 ### Task 3: Catalogue resilience
 
@@ -58,12 +58,12 @@ Item: `{kind,id,title,subtitle,cover_url,count,first_played,last_played}`.
 **Produces:** existing `search(query,limit)` shape with dual search, bounded retries,
 60s fresh/15min stale cache, max64 LRU keys and copy-on-return.
 
-- [ ] Write failing respx tests for REST failure + GraphQL success, merge/dedup,
+- [x] Write failing respx tests for REST failure + GraphQL success, merge/dedup,
   429/503 retry, no retry400, cache expiry/eviction, stale only on transient errors,
   concurrent requests and cache mutation isolation.
-- [ ] Implement typed normalization and bounded backoff; retain one token refresh401,
+- [x] Implement typed normalization and bounded backoff; retain one token refresh401,
   propagate cancellation and avoid unbounded work/caches.
-- [ ] Run all existing Zvuk search/drilldown tests with new resilience tests.
+- [x] Run all existing Zvuk search/drilldown tests with new resilience tests.
 
 ### Task 4: HA API and panel integration
 
@@ -71,19 +71,37 @@ Item: `{kind,id,title,subtitle,cover_url,count,first_played,last_played}`.
 sboom-history.js, www/sboom-panel.js, www/components/sboom-browse.js;
 tests/test_panel_features.py and UI smoke tests.
 
-- [ ] Write failing WS tests: `sboom/bluetooth {action,mac_address?,entry_id?}`;
+- [x] Write failing WS tests: `sboom/bluetooth {action,mac_address?,entry_id?}`;
   `sboom/history {order?}`; `sboom/history_clear`; user-scoped play recording.
-- [ ] Implement schemas, meaningful errors and optional history metadata on play.
-- [ ] Add Bluetooth component with loading/error/empty states and history component
+- [x] Implement schemas, meaningful errors and optional history metadata on play.
+- [x] Add Bluetooth component with loading/error/empty states and history component
   with recent/frequent, repeat play and clear. Mount in panel using existing tokens.
-- [ ] Reload history after successful browse launch; discard stale requests on device
+- [x] Reload history after successful browse launch; discard stale requests on device
   changes, disable duplicate requests, use Lit text interpolation for names/metadata.
-- [ ] Verify JS syntax and exercise rendered UI against a fake HA WebSocket backend.
+- [x] Verify JS syntax and exercise rendered UI against a fake HA WebSocket backend.
 
 ### Task 5: Release and review
 
-- [ ] Run complete test suite and py_compile; address introduced lint errors.
-- [ ] Update README for discoverability semantics, scan, history scope/cache behavior.
-- [ ] Update manifest and CHANGELOG to 0.38.0; keep existing local settings/research.
-- [ ] Independent review of the complete diff and fix substantive findings with tests.
-- [ ] Commit on current branch; no merge/push/deployment.
+- [x] Run complete test suite and py_compile; address introduced lint errors.
+- [x] Update README for discoverability semantics, scan, history scope/cache behavior.
+- [x] Update manifest and CHANGELOG to 0.38.0; keep existing local settings/research.
+- [x] Independent review of the complete diff and fix substantive findings with tests.
+- [x] Commit on current branch; no merge/push/deployment.
+
+## Проверка реализации
+
+Реализованы все три выбранных направления. Независимый review обнаружил
+и закрыл: ошибку имён исполнителей из очереди, reload после detach/reattach,
+потерю готового provider result при timeout второго, задержку volume poll при
+BT scan и ожидание свежего кеша на занятой блокировке.
+
+Уточнение scope: хранение через публичный HA Store сохраняет стандартный
+контракт ядра (некоторые ошибки диска сообщаются только в журнале HA).
+Новые runtime dependencies не добавлены. Нативный мультирум и питание BT
+не реализовывались; сопряжение остаётся командой discoverable.
+
+Проверки: полный Python suite на Python 3.11 и 3.14 — по 572 passed; Node 22 UI —
+10 passed; ruff всего проекта, py_compile, JSON/YAML и diff-check прошли.
+Проверены реальные Lit-компоненты с mock HA в браузере (desktop/mobile390px):
+BT status/scan, история, повторное воспроизведение, сортировка, подтверждение
+очистки; горизонтального overflow нет. Аппаратное тестирование не проводилось.

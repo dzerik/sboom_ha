@@ -32,6 +32,7 @@ from ._ha_helpers import get_zvuk_client, iter_coordinators
 from .const import DOMAIN
 from .coordinator import COMMAND_SPECS, SboomCoordinator
 from .helpers import cover_url, sber_device_id
+from .play_history import async_get_play_history, async_record_play
 from .zvuk_client import ZvukClient
 
 if TYPE_CHECKING:
@@ -332,6 +333,11 @@ async def ws_release(
         # kind / pt — синонимы (pt = playlist type в терминах Звука).
         vol.Optional("kind"): str,
         vol.Optional("pt"): str,
+        vol.Optional("history_item"): {
+            vol.Optional("title"): vol.All(str, vol.Length(max=512)),
+            vol.Optional("subtitle"): vol.All(str, vol.Length(max=512)),
+            vol.Optional("cover_url"): vol.All(str, vol.Length(max=2048)),
+        },
         vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
@@ -388,6 +394,15 @@ async def ws_play(
         _LOGGER.debug("sboom/play failed for %r: %s", deeplink, exc)
         connection.send_error(msg["id"], "command_failed", str(exc))
         return
+    if not response:
+        connection.send_error(msg["id"], "command_rejected", "Speaker rejected playback")
+        return
+    user_id = getattr(getattr(connection, "user", None), "id", None)
+    if user_id:
+        try:
+            await async_record_play(hass, user_id, deeplink, msg.get("history_item"))
+        except Exception as exc:  # a storage error cannot undo accepted playback
+            _LOGGER.debug("Unable to save playback history: %s", exc)
     connection.send_result(
         msg["id"], {"success": True, "deeplink": deeplink, "response": response}
     )
@@ -537,6 +552,87 @@ async def ws_queue(
     connection.send_result(msg["id"], {"queue": items})
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "sboom/bluetooth",
+        vol.Optional("action", default="status"): vol.In(
+            ("status", "scan", "pair", "connect", "disconnect", "remove")
+        ),
+        vol.Optional("mac_address"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_bluetooth(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Read and control Bluetooth through the selected speaker's existing WS."""
+    coordinator = _get_coordinator(hass, msg.get("entry_id"))
+    if coordinator is None:
+        connection.send_error(msg["id"], "not_loaded", "Integration not loaded")
+        return
+    try:
+        result = await coordinator.async_bluetooth(msg.get("action", "status"), msg.get("mac_address"))
+    except (ValueError, TypeError) as exc:
+        connection.send_error(msg["id"], "invalid_args", str(exc))
+        return
+    except Exception as exc:
+        _LOGGER.debug("Bluetooth command failed: %s", exc)
+        connection.send_error(msg["id"], "command_failed", str(exc) or "Bluetooth command failed")
+        return
+    connection.send_result(msg["id"], result)
+
+
+def _history_user(connection: websocket_api.ActiveConnection, msg_id: int) -> str | None:
+    """History scope comes exclusively from the authenticated HA connection."""
+    user_id = getattr(getattr(connection, "user", None), "id", None)
+    if not isinstance(user_id, str) or not user_id:
+        connection.send_error(msg_id, "unauthorized", "Authenticated user required")
+        return None
+    return user_id
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "sboom/history",
+        vol.Optional("order", default="recent"): vol.In(("recent", "frequent")),
+    }
+)
+@websocket_api.async_response
+async def ws_history(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """List this user's successful launches."""
+    user_id = _history_user(connection, msg["id"])
+    if user_id is None:
+        return
+    try:
+        history = await async_get_play_history(hass)
+        items = await history.async_list(user_id, msg.get("order", "recent"))
+    except Exception as exc:
+        connection.send_error(msg["id"], "history_error", str(exc))
+        return
+    connection.send_result(msg["id"], {"items": items})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "sboom/history_clear"})
+@websocket_api.async_response
+async def ws_history_clear(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Clear this user's history without touching other users."""
+    user_id = _history_user(connection, msg["id"])
+    if user_id is None:
+        return
+    try:
+        history = await async_get_play_history(hass)
+        await history.async_clear(user_id)
+    except Exception as exc:
+        connection.send_error(msg["id"], "history_error", str(exc))
+        return
+    connection.send_result(msg["id"], {"success": True})
+
+
 _COMMANDS = (
     ws_devices,
     ws_state,
@@ -549,6 +645,9 @@ _COMMANDS = (
     ws_queue,
     ws_command,
     ws_cover_color,
+    ws_bluetooth,
+    ws_history,
+    ws_history_clear,
 )
 
 
