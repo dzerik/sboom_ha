@@ -36,6 +36,7 @@ class SboomBrowse extends LitElement {
       hass: { type: Object },
       entryId: { type: String },
       currentTrackId: { type: String },
+      historyTrackKey: { type: String },
       _stack: { type: Array, state: true },
       _query: { type: String, state: true },
       _queue: { type: Array, state: true },
@@ -92,6 +93,7 @@ class SboomBrowse extends LitElement {
   }
 
   updated(changed) {
+    if (changed.has("currentTrackId") || changed.has("historyTrackKey")) this._historyRevision += 1;
     if (changed.has("entryId")) {
       // Смена колонки — сброс в корень + перечитать очередь.
       this._stack = [{ kind: "queue" }];

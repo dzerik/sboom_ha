@@ -494,6 +494,10 @@ class SboomPanel extends SboomFeedBase {
             .hass=${this.hass}
             .entryId=${this._entryId}
             .currentTrackId=${this._state?.track?.track_id}
+            .historyTrackKey=${this._state?.track ? JSON.stringify([
+              this._state.track.track_id, this._state.track.media_source,
+              this._state.track.title, this._state.track.artists, this._state.track.playing,
+            ]) : ""}
           ></sboom-browse>
         </section>
       </div>

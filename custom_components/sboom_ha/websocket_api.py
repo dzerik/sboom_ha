@@ -592,30 +592,55 @@ def _history_user(connection: websocket_api.ActiveConnection, msg_id: int) -> st
     return user_id
 
 
+def _history_scope(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                   msg: dict[str, Any], user_id: str) -> str | None:
+    if msg.get("scope", "launches") == "launches":
+        return user_id
+    if msg.get("scope") != "played":
+        connection.send_error(msg["id"], "invalid_args", "Unknown history scope")
+        return None
+    coordinator = _get_coordinator(hass, msg.get("entry_id"))
+    if coordinator is None:
+        connection.send_error(msg["id"], "not_loaded", "Integration not loaded")
+        return None
+    return f"speaker:{coordinator.entry.entry_id}"
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/history",
         vol.Optional("order", default="recent"): vol.In(("recent", "frequent")),
+        vol.Optional("scope", default="launches"): vol.In(("launches", "played")),
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
 async def ws_history(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """List this user's successful launches."""
+    """List personal launches or the selected speaker's observed playback."""
     user_id = _history_user(connection, msg["id"])
     if user_id is None:
         return
+    scope = _history_scope(hass, connection, msg, user_id)
+    if scope is None:
+        return
     try:
+        if msg.get("scope") == "played":
+            await _get_coordinator(hass, msg.get("entry_id")).async_flush_listening()
         history = await async_get_play_history(hass)
-        items = await history.async_list(user_id, msg.get("order", "recent"))
+        items = await history.async_list(scope, msg.get("order", "recent"))
     except Exception as exc:
         connection.send_error(msg["id"], "history_error", str(exc))
         return
     connection.send_result(msg["id"], {"items": items})
 
 
-@websocket_api.websocket_command({vol.Required("type"): "sboom/history_clear"})
+@websocket_api.websocket_command({
+    vol.Required("type"): "sboom/history_clear",
+    vol.Optional("scope", default="launches"): vol.In(("launches", "played")),
+    vol.Optional("entry_id"): vol.Any(str, None),
+})
 @websocket_api.async_response
 async def ws_history_clear(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -624,9 +649,14 @@ async def ws_history_clear(
     user_id = _history_user(connection, msg["id"])
     if user_id is None:
         return
+    scope = _history_scope(hass, connection, msg, user_id)
+    if scope is None:
+        return
     try:
+        if msg.get("scope") == "played":
+            await _get_coordinator(hass, msg.get("entry_id")).async_flush_listening()
         history = await async_get_play_history(hass)
-        await history.async_clear(user_id)
+        await history.async_clear(scope)
     except Exception as exc:
         connection.send_error(msg["id"], "history_error", str(exc))
         return

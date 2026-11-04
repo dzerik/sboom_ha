@@ -18,7 +18,7 @@ function component(file, tag) {
     LitElement: Element, html: (strings, ...values) => ({ strings, values }),
     css: (strings) => strings.join(""), nothing: null, CustomEvent,
     customElements: { define: (name, klass) => registry.set(name, klass), get: (name) => registry.get(name) },
-    console, setTimeout, clearTimeout,
+    console, setTimeout, clearTimeout, window: { matchMedia: () => ({ matches: true }) },
   });
   return new (registry.get(tag))();
 }
@@ -155,4 +155,31 @@ test("Open Bluetooth refreshes after reattachment", async () => {
   view.connectedCallback();
   await new Promise(setImmediate);
   assert.equal(calls, 1);
+});
+
+test("History defaults to listened songs on the selected speaker", async () => {
+  const view = component("sboom-history.js", "sboom-history");
+  let request;
+  view.entryId = "living";
+  view.hass = { user: { id: "alice" }, callWS: async (msg) => { request = msg; return { items: [] }; } };
+  await view._load();
+  assert.equal(request.scope, "played");
+  assert.equal(request.entry_id, "living");
+});
+
+test("History never tries to replay non-catalogue Bluetooth records", () => {
+  const view = component("sboom-history.js", "sboom-history");
+  let calls = 0;
+  view.addEventListener("history-play", () => { calls += 1; });
+  view._play({ id: "synthetic", kind: "bluetooth", playable: false });
+  assert.equal(calls, 0);
+});
+
+test("Displayed history refreshes when actual speaker metadata changes", () => {
+  const view = component("sboom-browse.js", "sboom-browse");
+  view._queueFetched = true;
+  view.currentTrackId = "42";
+  view._stack = [{ kind: "history" }];
+  view.updated(new Map([["currentTrackId", "41"]]));
+  assert.equal(view._historyRevision, 1);
 });

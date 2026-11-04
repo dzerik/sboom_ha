@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import math
 import re
 import time
 from copy import deepcopy
-from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+
+from .helpers import cover_url
+
+if TYPE_CHECKING:
+    from ._models import TrackInfo
 
 _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY = "sboom_ha.play_history"
@@ -32,6 +38,10 @@ def _identity(item: Any) -> tuple[str, str] | None:
     if not isinstance(item, dict):
         return None
     kind, content_id = item.get("kind"), item.get("id")
+    if kind in ("bluetooth", "radio"):
+        if isinstance(content_id, str) and re.fullmatch(r"[0-9a-f]{32}", content_id):
+            return kind, content_id
+        return None
     if not isinstance(kind, str) or kind not in _ID_PARAMS:
         return None
     if not isinstance(content_id, str) or not re.fullmatch(r"[0-9]{1,64}", content_id):
@@ -57,13 +67,39 @@ def _metadata(item: dict) -> dict[str, str]:
                     or parsed.password
                 ):
                     continue
-                # Covers are public; query strings may contain access tokens.
-                value = parsed._replace(query="", fragment="").geturl()
+                # The public Zvuk CDN needs type/id/size; arbitrary query fields
+                # can carry tokens and are never retained in history.
+                query = ""
+                if parsed.hostname == "cdn-image.zvuk.com":
+                    fields = parse_qs(parsed.query, max_num_fields=20)
+                    query = urlencode({key: values[0] for key, values in fields.items()
+                                       if key in ("type", "id", "size")})
+                value = parsed._replace(query=query, fragment="").geturl()
             except ValueError:
                 continue
         if value:
             result[key] = value
     return result
+
+
+def listening_item(track: TrackInfo | None) -> dict | None:
+    """Describe an actually playing song; non-catalogue sources cannot be replayed."""
+    if track is None or track.playing is not True:
+        return None
+    title = track.title or ""
+    artists = ", ".join(str(artist) for artist in track.artists)
+    source = (track.media_source or "").upper()
+    if source in ("BLUETOOTH", "RADIO"):
+        if not title.strip():
+            return None
+        kind = source.lower()
+        identity = "\0".join((source, title, artists, track.station_name or ""))
+        content_id = hashlib.sha256(identity.encode()).hexdigest()[:32]
+    else:
+        kind, content_id = "track", track.track_id
+    item = {"kind": kind, "id": content_id, "title": title or content_id,
+            "subtitle": artists, "cover_url": cover_url(track) or ""}
+    return item if _identity(item) is not None else None
 
 
 def _stored_item(item: Any) -> dict | None:
@@ -93,6 +129,7 @@ def _stored_item(item: Any) -> dict | None:
         "count": count,
         "first_played": first,
         "last_played": last,
+        **({"playable": False} if kind in ("bluetooth", "radio") else {}),
     }
 
 
@@ -161,6 +198,7 @@ class PlayHistory:
                 "count": 0,
                 "first_played": now,
                 "last_played": now,
+                **({"playable": False} if kind in ("bluetooth", "radio") else {}),
             }
             if previous is not None:
                 record.update(previous)

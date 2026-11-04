@@ -7,6 +7,7 @@ import logging
 import random
 import re
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
@@ -58,6 +59,7 @@ from .helpers import sber_device_id
 from .hw_monitor import HwMonitor
 from .lyrics_client import Lyrics
 from .lyrics_manager import LyricsManager
+from .play_history import async_get_play_history, listening_item
 
 # Event types для HA event bus.
 EVENT_TRACK_CHANGED = "sboom_track_changed"
@@ -161,6 +163,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.paired_bt: list[BluetoothDevice] = []  # спаренные BT-устройства (op=19)
         self.scanned_bt: list[BluetoothDevice] = []
         self._bluetooth_lock = asyncio.Lock()
+        self._last_listened_key: tuple[str, str] | None = None
+        self._listening_pending: deque[dict] = deque(maxlen=100)
+        self._listening_active_key: tuple[str, str] | None = None
+        self._listening_task: asyncio.Task | None = None
         self.connected: bool = False  # доступность колонки (для entity.available)
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
@@ -345,6 +351,14 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._supervisor_task.cancel()
             self._supervisor_task = None
         await self.client.close()
+        task = self._listening_task
+        if task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5)
+            except TimeoutError:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            self._listening_pending.clear()
         # Флашим отложенный (debounced) save лирики сейчас: после unload
         # запланированный async_delay_save писал бы в Store мёртвого entry.
         await self.lyrics.async_flush()
@@ -611,7 +625,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             track.received_ts = time.time()
         return track
 
-    def _maybe_update_track_from_state(self) -> None:
+    def _maybe_update_track_from_state(self) -> TrackInfo | None:
         """Пересобрать now-playing из свежего GET_STATE (push-путь).
 
         Смена песни по Bluetooth/радио приходит push'ем GET_STATE (metadata-push
@@ -626,6 +640,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.track is None or not self.track.track_id or derived.playing:
             self.track = self._stamp_track(derived)
             self._maybe_fetch_lyrics()
+            return self.track
+        return None
 
     def _track_from_current_state(self) -> TrackInfo | None:
         """Now-playing из последнего GET_STATE (радио/Bluetooth — без trackId)."""
@@ -688,6 +704,9 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                     else:
                         _LOGGER.debug("get_metadata и GET_STATE без now-playing")
+                # Capture now, before paired/hardware awaits can let a newer
+                # push arrive. Enqueueing at the end would reorder old/new songs.
+                self._queue_listening(self.track)
         except Exception as exc:
             _LOGGER.debug("get_metadata failed: %s", exc)
         try:
@@ -740,6 +759,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         prev_state = self.state
         changed = False
         metadata_updated = False
+        observed_track = None
         if OP_GET_META_DATA in req_data:    # MetaData update
             try:
                 new_track = self._stamp_track(self.client.parse_track(raw))
@@ -748,6 +768,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._maybe_fetch_lyrics()
                     changed = True
                     metadata_updated = True
+                    observed_track = new_track
             except Exception:  # pragma: no cover
                 _LOGGER.exception("metadata push parse failed")
         if OP_GET_STATE in req_data:    # State update
@@ -767,11 +788,12 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.state = self._merge_state(new_state)
                     changed = True
                     if not metadata_updated:
-                        self._maybe_update_track_from_state()
+                        observed_track = self._maybe_update_track_from_state()
             except Exception:
                 _LOGGER.exception("state push parse failed")
         if changed:
             self._bump_mutations()
+            self._queue_listening(observed_track)
             self._fire_change_events(prev_track, prev_state)
             # Прямое обновление + update_listeners вместо async_set_updated_data:
             # последний отменяет pending request_refresh (подтверждение команд)
@@ -779,6 +801,59 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # активном воспроизведении громкость старела бы неограниченно.
             self.data = {"state": self.state, "track": self.track}
             self.async_update_listeners()
+
+    def _queue_listening(self, track: TrackInfo | None) -> None:
+        """Capture confirmed metadata without blocking the sole WS receiver."""
+        item = listening_item(track)
+        if item is None or self._stopping:
+            return
+        key = (item["kind"], item["id"])
+        previous = (
+            (self._listening_pending[-1]["kind"], self._listening_pending[-1]["id"])
+            if self._listening_pending else self._listening_active_key or self._last_listened_key
+        )
+        if key == previous:
+            return
+        self._listening_pending.append(item)
+        if self._listening_task is None or self._listening_task.done():
+            self._listening_task = self.hass.async_create_background_task(
+                self._async_write_listening(), name=f"sboom-history-{self.entry.entry_id}"
+            )
+
+    async def async_flush_listening(self) -> None:
+        """History readers may wait for storage; the transport never does."""
+        task = self._listening_task
+        if task is not None:
+            await asyncio.shield(task)
+
+    async def _async_write_listening(self) -> None:
+        """Persist the bounded queue in arrival order using one managed task."""
+        try:
+            while self._listening_pending:
+                item = self._listening_pending.popleft()
+                key = (item["kind"], item["id"])
+                self._listening_active_key = key
+                await self._async_save_listened_item(item, key)
+                self._listening_active_key = None
+        finally:
+            self._listening_active_key = None
+            self._listening_task = None
+
+    async def _async_save_listened_item(self, item: dict, key: tuple[str, str]) -> None:
+        try:
+            if key == self._last_listened_key:
+                return
+            history = await async_get_play_history(self.hass)
+            scope = f"speaker:{self.entry.entry_id}"
+            if self._last_listened_key is None:
+                rows = await history.async_list(scope)
+                if rows and (rows[0]["kind"], rows[0]["id"]) == key:
+                    self._last_listened_key = key
+                    return
+            await history.async_record(scope, item)
+            self._last_listened_key = key
+        except Exception:
+            _LOGGER.warning("Unable to persist listening history")
 
     # ─────────────────────── event bus ───────────────────────
 

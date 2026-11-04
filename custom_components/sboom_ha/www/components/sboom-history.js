@@ -6,6 +6,7 @@ class SboomHistory extends LitElement {
     hass: { type: Object }, entryId: { type: String }, refreshToken: { type: Number },
     _items: { state: true }, _order: { state: true }, _busy: { state: true },
     _error: { state: true }, _confirmClear: { state: true },
+    _scope: { state: true },
   };
 
   constructor() {
@@ -15,6 +16,7 @@ class SboomHistory extends LitElement {
     this.refreshToken = 0;
     this._items = [];
     this._order = "recent";
+    this._scope = "played";
     this._busy = false;
     this._error = "";
     this._confirmClear = false;
@@ -54,13 +56,15 @@ class SboomHistory extends LitElement {
     if (!this.hass?.user?.id) return;
     const request = ++this._requestId;
     const user = this.hass.user.id;
+    const entry = this.entryId;
+    const scope = this._scope;
     this._loadedUser = user;
     this._confirmClear = false;
     this._busy = true;
     this._error = "";
     try {
-      const result = await this.hass.callWS({ type: "sboom/history", order: this._order });
-      if (request !== this._requestId || user !== this.hass?.user?.id) return;
+      const result = await this.hass.callWS({ type: "sboom/history", order: this._order, scope, entry_id: entry });
+      if (request !== this._requestId || user !== this.hass?.user?.id || entry !== this.entryId || scope !== this._scope) return;
       this._items = Array.isArray(result?.items) ? result.items : [];
     } catch (error) {
       if (request === this._requestId && user === this.hass?.user?.id) this._error = error.message || String(error);
@@ -74,11 +78,13 @@ class SboomHistory extends LitElement {
     if (!this._confirmClear) { this._confirmClear = true; return; }
     const request = ++this._requestId;
     const user = this.hass.user.id;
+    const entry = this.entryId;
+    const scope = this._scope;
     this._busy = true;
     this._error = "";
     try {
-      await this.hass.callWS({ type: "sboom/history_clear" });
-      if (request !== this._requestId || user !== this.hass?.user?.id) return;
+      await this.hass.callWS({ type: "sboom/history_clear", scope, entry_id: entry });
+      if (request !== this._requestId || user !== this.hass?.user?.id || entry !== this.entryId || scope !== this._scope) return;
       this._items = [];
       this._confirmClear = false;
     } catch (error) {
@@ -89,7 +95,7 @@ class SboomHistory extends LitElement {
   }
 
   _play(item) {
-    if (this._busy) return;
+    if (this._busy || item.playable === false || ["bluetooth", "radio"].includes(item.kind)) return;
     this.dispatchEvent(new CustomEvent("history-play", { detail: item, bubbles: true, composed: true }));
   }
 
@@ -98,25 +104,37 @@ class SboomHistory extends LitElement {
     this._load();
   }
 
+  _setScope(scope) {
+    if (scope === this._scope) return;
+    this._scope = scope;
+    this._items = [];
+    this._load();
+  }
+
   render() {
-    return html`<div class="toolbar">
+    return html`<div class="scopes" role="group" aria-label="Тип истории">
+      <button aria-pressed=${String(this._scope === "played")} @click=${() => this._setScope("played")}>Прослушанные</button>
+      <button aria-pressed=${String(this._scope === "launches")} @click=${() => this._setScope("launches")}>Мои запуски</button>
+    </div>
+    <p class="hint">${this._scope === "played" ? "Общая история выбранной колонки: музыка, запущенная из любого источника." : "Ваши успешные запуски из панели и сервиса Home Assistant."}</p>
+    <div class="toolbar">
       <div class="orders" role="group" aria-label="Порядок истории">
         <button aria-pressed=${String(this._order === "recent")} ?disabled=${this._busy} @click=${() => this._sort("recent")}>Недавние</button>
         <button aria-pressed=${String(this._order === "frequent")} ?disabled=${this._busy} @click=${() => this._sort("frequent")}>Частые</button>
       </div>
       ${this._items.length ? html`<button class="clear" ?disabled=${this._busy} @click=${this._clear}>
-        ${this._confirmClear ? "Подтвердить очистку" : "Очистить историю"}</button>` : nothing}
+        ${this._confirmClear ? "Подтвердить очистку" : this._scope === "played" ? "Очистить историю колонки" : "Очистить мои запуски"}</button>` : nothing}
       ${this._confirmClear ? html`<button @click=${() => { this._confirmClear = false; }}>Отмена</button>` : nothing}
     </div>
     ${this._error ? html`<p class="error" role="alert">${this._error} <button @click=${this._load}>Повторить</button></p>` : nothing}
     ${this._busy ? html`<p role="status">Загрузка истории…</p>` : nothing}
-    ${!this._items.length && !this._busy && !this._error ? html`<p class="empty">Здесь появятся ваши запуски из каталога. Найдите музыку и нажмите «Слушать».</p>` : nothing}
+    ${!this._items.length && !this._busy && !this._error ? html`<p class="empty">${this._scope === "played" ? "Здесь появятся треки, которые играет эта колонка." : "Здесь появятся ваши запуски из каталога. Найдите музыку и нажмите «Слушать»."}</p>` : nothing}
     <ul>${this._items.map((item) => html`<li>
-      <button class="item" ?disabled=${this._busy || !this.entryId} @click=${() => this._play(item)} aria-label=${`Слушать ${item.title || item.id}`}>
+      <button class="item" ?disabled=${this._busy || !this.entryId || item.playable === false} @click=${() => this._play(item)} aria-label=${item.playable === false ? item.title : `Слушать ${item.title || item.id}`}>
         ${item.cover_url ? html`<img src=${item.cover_url} alt="" loading="lazy" />` : html`<span class="art" aria-hidden="true">♪</span>`}
-        <span class="meta"><strong>${item.title || item.id}</strong><span>${item.subtitle || item.kind}</span></span>
+        <span class="meta"><strong>${item.title || item.id}</strong><span>${item.subtitle || item.kind}${item.playable === false ? (item.kind === "bluetooth" ? " · Bluetooth" : " · Радио") : ""}</span></span>
         ${this._order === "frequent" ? html`<span class="count">${item.count}×</span>` : nothing}
-        <span class="play" aria-hidden="true">▶</span>
+        ${item.playable === false ? nothing : html`<span class="play" aria-hidden="true">▶</span>`}
       </button>
     </li>`)}</ul>`;
   }
@@ -124,6 +142,8 @@ class SboomHistory extends LitElement {
   static styles = css`
     :host { display: block; color: var(--sb-ink); font: inherit; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .scopes { display: flex; gap: 8px; flex-wrap: wrap; }
+    .hint { margin: 10px 0 18px; }
     .orders { display: flex; gap: 4px; margin-right: auto; }
     button { font: inherit; font-size: 13px; color: var(--sb-ink-dim); background: transparent; border: 1px solid var(--sb-line); border-radius: var(--sb-radius-sm); padding: 8px 10px; cursor: pointer; }
     button[aria-pressed="true"] { color: var(--sb-ink); background: var(--sb-elev-2); border-color: var(--sb-accent); }
