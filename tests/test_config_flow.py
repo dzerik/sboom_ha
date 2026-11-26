@@ -11,8 +11,10 @@ flow-manager превращает в abort-результат, здесь лов
 from __future__ import annotations
 
 from typing import Any, ClassVar
+from unittest.mock import AsyncMock
 
 import pytest
+import websockets
 
 from tests._ha_stubs import (
     AbortFlow,
@@ -25,6 +27,7 @@ from tests._ha_stubs import (
 install_stubs()
 
 from sboom_ha import config_flow as cf  # noqa: E402
+from sboom_ha._tlv import decode, field  # noqa: E402
 from sboom_ha.config_flow import SboomConfigFlow  # noqa: E402
 from sboom_ha.const import (  # noqa: E402
     CONF_CLIENT_ID,
@@ -136,6 +139,38 @@ class _FakeSpeakerClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+async def test_discovered_tv_pairs_after_button_confirmation(monkeypatch):
+    flow = _make_flow(HomeAssistant())
+    discovery = await flow.async_step_zeroconf(
+        _zeroconf_info("192.0.2.15", device_id="tv-123", name="ТВ в гостиной", model="TV")
+    )
+    assert discovery["step_id"] == "discovery_confirm"
+    form = await flow.async_step_discovery_confirm({CONF_CLIENT_NAME: "HA test"})
+    assert form["step_id"] == "pair"
+
+    # В первом ответе поле 4 несёт ID сессии, в поле 6 второго — токен после «+».
+    session_id = b"test-pairing-session"
+    token = b"test-confirmed-token"
+    waiting = field(5, 2, field(4, 2, field(1, 0, 1) + field(2, 2, session_id)))
+    confirmed = field(5, 2, field(6, 2, field(1, 0, 1) + field(2, 2, token)))
+    socket = AsyncMock()
+    socket.recv.side_effect = [waiting, confirmed]
+    monkeypatch.setattr(websockets, "connect", AsyncMock(return_value=socket))
+
+    result = await flow.async_step_pair({})
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_DEVICE_ID] == "tv-123"
+    assert result["data"][CONF_PIN_ACCESS_TOKEN] == token.decode()
+    socket.send.assert_awaited_once()
+    request = decode(socket.send.await_args.args[0])
+    assert request[5] == {4: {1: ""}}
+    assert request[7] == "HA test"
+    assert result["data"][CONF_CLIENT_ID] == request[11]
+    assert socket.recv.await_count == 2
+    socket.close.assert_awaited_once()
 
 
 # ───────────────────────── zeroconf: healing-миграция ─────────────────────────

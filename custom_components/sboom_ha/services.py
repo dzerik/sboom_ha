@@ -9,9 +9,16 @@ from __future__ import annotations
 import logging
 
 import voluptuous as vol
+from homeassistant.auth.permissions.const import POLICY_CONTROL
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+    UnknownUser,
+)
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from websockets.exceptions import ConnectionClosed
 
 from ._deeplink import play_deeplink, send_server_action
@@ -82,7 +89,9 @@ def _loaded_coordinators(hass: HomeAssistant) -> dict[str, SboomCoordinator]:
     return {entry.entry_id: coord for entry, coord in iter_coordinators(hass)}
 
 
-def _coords_from_call(hass: HomeAssistant, call: ServiceCall) -> list[SboomCoordinator]:
+def _coords_from_call(
+    hass: HomeAssistant, call: ServiceCall, *, no_match_key: str = "no_loaded_speakers"
+) -> list[SboomCoordinator]:
     """Извлечь все SboomCoordinator'ы, на которые таргетится service-call.
 
     Поддерживает device_id-таргетинг. Если таргет не указан — все загруженные.
@@ -111,7 +120,7 @@ def _coords_from_call(hass: HomeAssistant, call: ServiceCall) -> list[SboomCoord
     if not selected:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
-            translation_key="no_loaded_speakers",
+            translation_key=no_match_key,
         )
     return selected
 
@@ -197,11 +206,28 @@ async def _handle_tv_action(hass: HomeAssistant, call: ServiceCall) -> None:
     """Отправить действие одному сопряжённому телевизору."""
     if not call.data.get("device_id", "").strip():
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="tv_device_required")
-    coords = _coords_from_call(hass, call)
+    user_id = call.context.user_id
+    user = await hass.auth.async_get_user(user_id) if user_id else None
+    if user_id and user is None:
+        raise UnknownUser(context=call.context)
+
+    coords = _coords_from_call(hass, call, no_match_key="tv_device_required")
     if len(coords) != 1:
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="tv_device_required")
 
     coord = coords[0]
+    if user is not None:
+        entries = er.async_entries_for_device(
+            er.async_get(hass), call.data["device_id"], include_disabled_entities=True,
+        )
+        if not any(
+            entity.config_entry_id == coord.entry.entry_id
+            and entity.platform == DOMAIN
+            and entity.domain == "media_player"
+            and user.permissions.check_entity(entity.entity_id, POLICY_CONTROL)
+            for entity in entries
+        ):
+            raise Unauthorized(context=call.context, permission=POLICY_CONTROL)
     if not coord.entry.options.get(OPT_ENABLE_TV_CONTROLS, False):
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="tv_controls_disabled"

@@ -43,6 +43,16 @@ class ConfigEntryNotReady(HomeAssistantError):
     """stub: setup не готов, HA повторит попытку."""
 
 
+class Unauthorized(HomeAssistantError):
+    def __init__(self, *, context, permission=None):
+        super().__init__("Unauthorized")
+        self.context = context
+
+
+class UnknownUser(Unauthorized):
+    pass
+
+
 class ServiceValidationError(HomeAssistantError):
     """Stub: ошибка валидации service call."""
 
@@ -84,6 +94,7 @@ class ServiceCall:
     domain: str = ""
     service: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+    context: Any = field(default_factory=lambda: types.SimpleNamespace(user_id=None))
 
 
 class _FakeDeviceRegistry:
@@ -841,6 +852,9 @@ def install_stubs() -> None:
 
     ha = _make_module("homeassistant")
     ha._SBOOM_STUB = True
+    _make_module("homeassistant.auth")
+    _make_module("homeassistant.auth.permissions")
+    _make_module("homeassistant.auth.permissions.const", POLICY_CONTROL="control")
     _make_module(
         "homeassistant.const",
         Platform=Platform,
@@ -867,6 +881,8 @@ def install_stubs() -> None:
         ConfigEntryNotReady=ConfigEntryNotReady,
         ConfigEntryAuthFailed=ConfigEntryAuthFailed,
         ServiceValidationError=ServiceValidationError,
+        Unauthorized=Unauthorized,
+        UnknownUser=UnknownUser,
         InvalidDeviceAutomationConfig=type(
             "InvalidDeviceAutomationConfig", (HomeAssistantError,), {}
         ),
@@ -886,6 +902,11 @@ def install_stubs() -> None:
     )
 
     _make_module("homeassistant.helpers")
+    _make_module(
+        "homeassistant.helpers.entity_registry",
+        async_get=lambda hass: hass.data["entity_registry"],
+        async_entries_for_device=lambda registry, device_id, **kwargs: registry[device_id],
+    )
     _make_module(
         "homeassistant.helpers.update_coordinator",
         DataUpdateCoordinator=DataUpdateCoordinator,

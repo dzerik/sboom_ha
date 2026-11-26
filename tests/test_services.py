@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import voluptuous as vol
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+    UnknownUser,
+)
 from homeassistant.helpers import device_registry as dr
 from sboom_ha import services as sboom_services
 from sboom_ha.const import DOMAIN
@@ -303,10 +308,43 @@ async def test_tv_action_rejects_invalid_targets_without_sending(tv_target, monk
     elif scenario == "no-token":
         tv.client.pin_access_token = ""
 
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as err:
         await handler(ServiceCall(data={"device_id": device_id, "command": "show_inputs"}))
 
     send.assert_not_awaited()
+    if scenario in {"unknown", "unloaded"}:
+        assert err.value.translation_key == "tv_device_required"
+
+
+@pytest.mark.parametrize("access", ["allowed", "read-only", "other-entry", "unknown-user"])
+async def test_tv_action_requires_control_of_selected_player(tv_target, monkeypatch, access):
+    tv, _ = tv_target
+    player_id = "media_player.renamed_tv"
+    registry_entry = SimpleNamespace(
+        domain="media_player", platform=DOMAIN, entity_id=player_id,
+        config_entry_id="other" if access == "other-entry" else tv.entry.entry_id,
+    )
+    tv.hass.data["entity_registry"] = {"tv-device": [registry_entry]}
+    check = MagicMock(return_value=access != "read-only")
+    user = SimpleNamespace(permissions=SimpleNamespace(check_entity=check))
+    tv.hass.auth = SimpleNamespace(async_get_user=AsyncMock(
+        return_value=None if access == "unknown-user" else user
+    ))
+    send = AsyncMock(return_value={1: "OK"})
+    monkeypatch.setattr(sboom_services, "send_server_action", send)
+    handler = tv.hass.services._registered[(DOMAIN, "tv_action")]
+    call = ServiceCall(data={"device_id": "tv-device", "command": "show_inputs"},
+                       context=SimpleNamespace(user_id="viewer"))
+
+    if access == "allowed":
+        await handler(call)
+        send.assert_awaited_once()
+    else:
+        with pytest.raises(UnknownUser if access == "unknown-user" else Unauthorized):
+            await handler(call)
+        send.assert_not_awaited()
+    if access in {"allowed", "read-only"}:
+        check.assert_called_once_with(player_id, "control")
 
 
 @pytest.mark.parametrize(

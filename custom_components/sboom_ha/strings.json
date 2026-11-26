@@ -79,7 +79,11 @@
           "lyrics_netease_fallback": "Use NetEase as a fallback lyrics source",
           "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)",
           "karaoke_fill": "Karaoke fill (highlight the line as it is sung)",
-          "panel_enabled": "Show the player panel in the sidebar"
+          "panel_enabled": "Show the player panel in the sidebar",
+          "enable_tv_controls": "Experimental TV controls"
+        },
+        "data_description": {
+          "enable_tv_controls": "Enable input, channel and settings actions for this paired Sber TV."
         }
       }
     }
@@ -278,6 +282,24 @@
     },
     "no_loaded_speakers": {
       "message": "No loaded SBoom speakers match this call. Check that the integration is set up and the device is targeted correctly."
+    },
+    "tv_device_required": {
+      "message": "Select a device that matches exactly one loaded SBoom entry."
+    },
+    "tv_controls_disabled": {
+      "message": "Enable Experimental TV controls in the options for this TV."
+    },
+    "tv_not_paired": {
+      "message": "Pair this TV before sending TV actions."
+    },
+    "tv_action_timeout": {
+      "message": "The TV did not respond in time. Check the TV screen before trying again."
+    },
+    "tv_connection_unavailable": {
+      "message": "The TV connection is unavailable. Check that the TV is on and connected to the network."
+    },
+    "tv_action_unconfirmed": {
+      "message": "The TV did not confirm the action."
     }
   },
   "services": {
@@ -318,6 +340,20 @@
           "description": "Action to perform."
         }
       }
+    },
+    "tv_action": {
+      "name": "Sber TV action (beta)",
+      "description": "Send an input, channel or settings action to a paired Sber TV.",
+      "fields": {
+        "device_id": {
+          "name": "TV",
+          "description": "A paired Sber TV with Experimental TV controls enabled."
+        },
+        "command": {
+          "name": "Command",
+          "description": "The action to send to the TV."
+        }
+      }
     }
   },
   "device_automation": {
@@ -335,6 +371,17 @@
       "refresh_metadata": "Refresh metadata",
       "find_remote": "Find remote",
       "bt_pairing": "Bluetooth pairing"
+    }
+  },
+  "selector": {
+    "tv_command": {
+      "options": {
+        "show_inputs": "Show inputs",
+        "next_input": "Next input",
+        "channel_up": "Next channel",
+        "channel_down": "Previous channel",
+        "settings": "Open settings"
+      }
     }
   }
 }

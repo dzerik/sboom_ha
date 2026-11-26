@@ -6,7 +6,7 @@ import json
 import struct
 
 import pytest
-from sboom_ha._deeplink import build_server_action
+from sboom_ha._deeplink import build_server_action, send_server_action
 from sboom_ha._tlv import decode, field
 from sboom_ha.api import SberSpeakerClient
 from sboom_ha.const import (
@@ -34,6 +34,68 @@ def _make_client() -> SberSpeakerClient:
     return SberSpeakerClient(
         host="192.0.2.10", client_id="x", pin_access_token="t" * 16
     )
+
+
+async def test_queued_deeplink_expires_without_sending_after_lock_release():
+    client = _make_client()
+    ws = client._ws = _CapturingWS()
+
+    async with client._lock, asyncio.timeout(1):
+        with pytest.raises(TimeoutError):
+            await send_server_action(client, "DEEPLINK", {"deeplink": "livetv://hdmi"}, timeout=0.01)
+
+    await asyncio.sleep(0)
+    assert ws.sent == []
+    assert not client._pending
+
+
+async def test_deeplink_expires_while_socket_send_is_blocked():
+    class StalledSend(_CapturingWS):
+        async def send(self, data):
+            await super().send(data)
+            await asyncio.Event().wait()
+
+    client = _make_client()
+    ws = client._ws = StalledSend()
+
+    async with asyncio.timeout(1):
+        with pytest.raises(TimeoutError):
+            await send_server_action(client, "DEEPLINK", {"deeplink": "livetv://hdmi"}, timeout=0.01)
+
+    assert len(ws.sent) == 1
+    assert not client._lock.locked()
+    assert not client._pending
+
+
+@pytest.mark.parametrize("disconnect", [False, True], ids=["ack", "closed"])
+async def test_deeplink_listener_matches_binary_reply_to_request(disconnect):
+    sent = asyncio.Event()
+
+    class ReplyingWS(_CapturingWS):
+        async def send(self, data):
+            await super().send(data)
+            sent.set()
+
+        async def __aiter__(self):
+            await sent.wait()
+            yield field(2, 2, b"other-request") + field(4, 2, field(1, 2, b"NOT OK"))
+            if not disconnect:
+                msg_id = decode(self.sent[0])[2].encode()
+                yield field(2, 2, msg_id) + field(4, 2, field(1, 2, b"OK"))
+
+    client = _make_client()
+    ws = client._ws = ReplyingWS()
+    async with asyncio.timeout(1), asyncio.TaskGroup() as tasks:
+        tasks.create_task(client._listen_loop())
+        action = send_server_action(client, "DEEPLINK", {"deeplink": "livetv://hdmi"})
+        if disconnect:
+            with pytest.raises(ConnectionError):
+                await action
+        else:
+            assert await action == {1: "OK"}
+
+    assert len(ws.sent) == 1
+    assert not client._pending
 
 
 def test_tv_deeplink_envelope_uses_the_paired_client():
@@ -199,16 +261,15 @@ async def test_get_scanned_bt_devices_encodes_op21_and_parses_response(monkeypat
 async def test_get_scanned_bt_timeout_cleans_pending_request(monkeypatch):
     client = _make_client()
     client._ws = _CapturingWS()
-    timeouts = []
-    real_wait_for = asyncio.wait_for
+    send = client.send_raw_request
 
-    async def fast_timeout(awaitable, timeout):
-        timeouts.append(timeout)
-        return await real_wait_for(awaitable, timeout=0.001)
+    async def send_with_short_deadline(envelope, msg_id, timeout):
+        assert timeout == 15
+        return await send(envelope, msg_id, timeout=0.001)
 
-    monkeypatch.setattr("sboom_ha.api.asyncio.wait_for", fast_timeout)
+    monkeypatch.setattr(client, "send_raw_request", send_with_short_deadline)
     with pytest.raises(TimeoutError):
         await client.get_scanned_bt_devices()
 
-    assert timeouts == [15]
+    assert len(client._ws.sent) == 1
     assert client._pending == {}

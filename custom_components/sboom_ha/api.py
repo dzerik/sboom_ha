@@ -443,18 +443,19 @@ class SberSpeakerClient:
         Публичная точка для нестандартных конвертов (ServerAction/deeplink,
         см. `_deeplink.py`): инкапсулирует `_ws`/`_pending`/`_lock`, чтобы
         внешние модули не зависели от приватных внутренностей клиента
-        (аудит #16). Envelope обязан несёт `msg_id` в поле корреляции —
-        listener матчит ответ по нему.
+        (аудит #16). Listener сопоставляет ответ по `msg_id` в конверте.
+        Один таймаут ограничивает очередь отправки, запись в WebSocket и ответ.
         """
         ws = self._ws
         if not ws:
             raise RuntimeError("not connected")
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[msg_id] = fut
         try:
-            async with self._lock:
-                await ws.send(envelope)
-            return await asyncio.wait_for(fut, timeout=timeout)
+            async with asyncio.timeout(timeout):
+                async with self._lock:
+                    self._pending[msg_id] = fut
+                    await ws.send(envelope)
+                return await fut
         finally:
             self._pending.pop(msg_id, None)
 

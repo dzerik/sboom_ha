@@ -90,6 +90,7 @@ tv_action:
       selector:
         select:
           mode: dropdown
+          translation_key: tv_command
           options:
             - show_inputs
             - next_input

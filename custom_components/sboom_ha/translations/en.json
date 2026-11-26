@@ -398,5 +398,16 @@
       "find_remote": "Find remote",
       "bt_pairing": "Bluetooth pairing"
     }
+  },
+  "selector": {
+    "tv_command": {
+      "options": {
+        "show_inputs": "Show inputs",
+        "next_input": "Next input",
+        "channel_up": "Next channel",
+        "channel_down": "Previous channel",
+        "settings": "Open settings"
+      }
+    }
   }
 }
