@@ -13,6 +13,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.loader import async_get_integration
 
 from .const import (
@@ -28,6 +29,7 @@ from .services import async_register_services
 from .websocket_api import async_setup_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 # Координатор живёт в entry.runtime_data (IQS bronze runtime-data),
 # а не в hass.data[DOMAIN].

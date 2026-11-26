@@ -1,6 +1,10 @@
 {
   "domain": "sboom_ha",
   "name": "SBoom (LAN)",
+  "categories": [
+    "media_entertainment.speakers_audio",
+    "media_entertainment.tv_streaming"
+  ],
   "codeowners": [
     "@TohaRG2",
     "@dzerik"
@@ -21,7 +25,7 @@
     "websockets>=13.0",
     "httpx>=0.27"
   ],
-  "version": "0.39.1-beta.1",
+  "version": "0.39.1-beta.2",
   "zeroconf": [
     {
       "type": "_staros._tcp.local."

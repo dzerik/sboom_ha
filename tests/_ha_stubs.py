@@ -903,6 +903,10 @@ def install_stubs() -> None:
 
     _make_module("homeassistant.helpers")
     _make_module(
+        "homeassistant.helpers.config_validation",
+        config_entry_only_config_schema=lambda domain: dict,
+    )
+    _make_module(
         "homeassistant.helpers.entity_registry",
         async_get=lambda hass: hass.data["entity_registry"],
         async_entries_for_device=lambda registry, device_id, **kwargs: registry[device_id],
