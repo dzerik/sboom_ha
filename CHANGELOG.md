@@ -6,7 +6,10 @@
 
 ## [Unreleased]
 
+## [0.35.7] — 2026-11-26
+
 ### Fixed
+- Исправлена проверка Hassfest. Интеграция использует Pillow из Home Assistant Core и объявляет настройку через интерфейс HA. В манифест добавлена категория HACS для колонок и аудиоустройств.
 - **`camera.<name>_lyrics_na_tv`: артист/заголовок теперь обновляются в караоке-стриме для Bluetooth и радио.** `artist` вычислялся один раз до while-loop и оставался frozen. Цикл живёт, пока `track_id` неизменен — а для BT/radio это `None` (либо stream-id) постоянно, при этом метаданные меняются с каждым треком. Итог: `track.title` брался свежий из `coordinator.track` и обновлялся, а `artist` застревал. Перенёс вычисление внутрь loop после `track = self.coordinator.track` (commit `4577285`).
 
 ### CI / Docs / Chores

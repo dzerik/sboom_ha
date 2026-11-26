@@ -875,7 +875,13 @@ def install_stubs() -> None:
         AbortFlow=AbortFlow,
     )
 
+    import voluptuous as _vol
+
     _make_module("homeassistant.helpers")
+    _make_module(
+        "homeassistant.helpers.config_validation",
+        config_entry_only_config_schema=lambda _domain: _vol.Schema(dict),
+    )
     _make_module(
         "homeassistant.helpers.update_coordinator",
         DataUpdateCoordinator=DataUpdateCoordinator,
@@ -934,8 +940,6 @@ def install_stubs() -> None:
         CalendarEvent=CalendarEvent,
     )
     # ── device automation (trigger/action) ──
-    import voluptuous as _vol
-
     _dev_autom_base = _vol.Schema(
         {
             _vol.Required("platform"): str,
