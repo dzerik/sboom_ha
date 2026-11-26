@@ -1,4 +1,4 @@
-"""Тесты custom services: refresh_metadata, reauth."""
+"""Тесты действий интеграции Home Assistant."""
 
 from __future__ import annotations
 
@@ -6,14 +6,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import voluptuous as vol
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
+from sboom_ha import services as sboom_services
 from sboom_ha.const import DOMAIN
 from sboom_ha.services import (
     SERVICE_REAUTH,
     SERVICE_REFRESH_METADATA,
     async_register_services,
 )
+from websockets.exceptions import ConnectionClosedError
 
-from tests._fakes import build_coordinator, make_state, make_track
+from tests._fakes import build_coordinator, make_entry, make_state, make_track
 from tests._ha_stubs import HomeAssistant, ServiceCall
 
 
@@ -197,3 +202,125 @@ async def test_bluetooth_device_wraps_speaker_errors():
     call = ServiceCall(data={"mac_address": "AA:BB:CC:DD:EE:FF", "command": "connect"})
     with pytest.raises(HomeAssistantError):
         await services._handle_bt_device(coord.hass, call)
+
+
+@pytest.fixture
+def tv_target():
+    entry = make_entry(entry_id="tv-entry")
+    entry.options["enable_tv_controls"] = True
+    tv = build_coordinator(entry=entry)
+    registry = dr.async_get(tv.hass)
+    registry.register(SimpleNamespace(id="tv-device", config_entries={entry.entry_id}))
+    async_register_services(tv.hass)
+    return tv, registry
+
+
+@pytest.mark.parametrize(
+    ("command", "link", "ack"),
+    [
+        ("show_inputs", "livetv://hdmi", {1: "OK"}),
+        ("next_input", "action://sberdevices.intent.action.TV_INPUT", {1: "OK"}),
+        ("channel_up", "action://sberdevices.intent.action.CHANNEL_NEXT", {1: "OK"}),
+        ("channel_down", "action://sberdevices.intent.action.CHANNEL_PREVIEW", {1: "OK"}),
+        ("settings", "sberdevices_app_v2://settings", {1: "OK"}),
+        ("show_inputs", "livetv://hdmi", "OK"),
+    ],
+)
+async def test_tv_action_sends_one_deeplink_to_the_selected_device(
+    tv_target, monkeypatch, command, link, ack
+):
+    tv, registry = tv_target
+    speaker = build_coordinator(hass=tv.hass, entry=make_entry(entry_id="speaker-entry"))
+    speaker.entry.options["enable_tv_controls"] = True
+    registry.register(
+        SimpleNamespace(id="speaker-device", config_entries={speaker.entry.entry_id})
+    )
+    # Регистрация при повторном setup остаётся идемпотентной.
+    key = (DOMAIN, "tv_action")
+    handler = tv.hass.services._registered[key]
+    async_register_services(tv.hass)
+    assert tv.hass.services._registered[key] is handler
+    send = AsyncMock(return_value=ack)
+    monkeypatch.setattr(sboom_services, "send_server_action", send)
+    data = tv.hass.services._schemas[key]({"device_id": "tv-device", "command": command})
+
+    await handler(ServiceCall(data=data))
+
+    send.assert_awaited_once_with(tv.client, "DEEPLINK", {"deeplink": link})
+
+
+@pytest.mark.parametrize("result", [{1: "NOT OK"}, {}, {1: 0}, ["OK"]])
+async def test_tv_action_rejects_unconfirmed_responses(tv_target, monkeypatch, result):
+    tv, _ = tv_target
+    handler = tv.hass.services._registered[(DOMAIN, "tv_action")]
+    send = AsyncMock(return_value=result)
+    monkeypatch.setattr(sboom_services, "send_server_action", send)
+
+    with pytest.raises(HomeAssistantError):
+        await handler(ServiceCall(data={"device_id": "tv-device", "command": "show_inputs"}))
+
+    send.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError(), OSError(), RuntimeError(), ConnectionClosedError(None, None)],
+)
+async def test_tv_action_wraps_transport_errors_without_retry(tv_target, monkeypatch, error):
+    tv, _ = tv_target
+    handler = tv.hass.services._registered[(DOMAIN, "tv_action")]
+    send = AsyncMock(side_effect=error)
+    monkeypatch.setattr(sboom_services, "send_server_action", send)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await handler(ServiceCall(data={"device_id": "tv-device", "command": "next_input"}))
+
+    assert exc_info.value.__cause__ is error
+    send.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["empty", "whitespace", "unknown", "unloaded", "ambiguous", "disabled", "no-token"],
+)
+async def test_tv_action_rejects_invalid_targets_without_sending(tv_target, monkeypatch, scenario):
+    tv, registry = tv_target
+    handler = tv.hass.services._registered[(DOMAIN, "tv_action")]
+    send = AsyncMock()
+    monkeypatch.setattr(sboom_services, "send_server_action", send)
+    device_id = "tv-device"
+    if scenario in {"empty", "whitespace", "unknown"}:
+        device_id = {"empty": "", "whitespace": " ", "unknown": "unknown-device"}[scenario]
+    elif scenario == "unloaded":
+        tv.entry.runtime_data = None
+    elif scenario == "ambiguous":
+        other = build_coordinator(hass=tv.hass, entry=make_entry(entry_id="other-entry"))
+        registry.register(
+            SimpleNamespace(id=device_id, config_entries={tv.entry.entry_id, other.entry.entry_id})
+        )
+    elif scenario == "disabled":
+        tv.entry.options.clear()
+    elif scenario == "no-token":
+        tv.client.pin_access_token = ""
+
+    with pytest.raises(ServiceValidationError):
+        await handler(ServiceCall(data={"device_id": device_id, "command": "show_inputs"}))
+
+    send.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"command": "show_inputs"},
+        {"device_id": ["tv-device", "speaker-device"], "command": "show_inputs"},
+        {"device_id": "tv-device"},
+        {"device_id": "tv-device", "command": "unknown"},
+    ],
+)
+def test_tv_action_schema_requires_one_device_and_a_known_command(tv_target, data):
+    tv, _ = tv_target
+    schema = tv.hass.services._schemas[(DOMAIN, "tv_action")]
+
+    with pytest.raises(vol.Invalid):
+        schema(data)

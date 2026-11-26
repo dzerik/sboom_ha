@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 
 import pytest
-from sboom_ha._tlv import field
+from sboom_ha._deeplink import build_server_action
+from sboom_ha._tlv import decode, field
 from sboom_ha.api import SberSpeakerClient
 from sboom_ha.const import (
     BT_CMD_DISCONNECT,
@@ -32,6 +34,32 @@ def _make_client() -> SberSpeakerClient:
     return SberSpeakerClient(
         host="192.0.2.10", client_id="x", pin_access_token="t" * 16
     )
+
+
+def test_tv_deeplink_envelope_uses_the_paired_client():
+    client = _make_client()
+    message_id = "00000000-0000-0000-0000-000000000001"
+
+    frame = decode(build_server_action(client, "DEEPLINK", {"deeplink": "livetv://hdmi"}, message_id))
+
+    assert frame[1] == frame[6] == frame[10] == 1
+    assert frame[2] == message_id
+    assert frame[3] == client.pin_access_token
+    assert frame[7] == client.client_name
+    assert frame[11] == client.client_id
+    assert json.loads(frame[4][1]) == {
+        "name": "DEEPLINK",
+        "payload": {"deeplink": "livetv://hdmi"},
+        "smartAppInfo": {
+            "appVersionId": "",
+            "applicationId": "",
+            "frontendEndpoint": "",
+            "frontendType": "",
+            "projectId": "",
+            "systemName": "",
+        },
+        "type": 1,
+    }
 
 
 # ─────────────────────── set_playback_speed ───────────────────────

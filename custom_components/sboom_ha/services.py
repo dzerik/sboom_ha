@@ -12,10 +12,11 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
+from websockets.exceptions import ConnectionClosed
 
-from ._deeplink import play_deeplink
+from ._deeplink import play_deeplink, send_server_action
 from ._ha_helpers import get_zvuk_client, iter_coordinators
-from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN
+from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN, OPT_ENABLE_TV_CONTROLS
 from .coordinator import SboomCoordinator
 from .play_history import async_record_play
 from .zvuk_client import ZvukClient
@@ -26,11 +27,19 @@ SERVICE_REFRESH_METADATA = "refresh_metadata"
 SERVICE_REAUTH = "reauth"
 SERVICE_BT_DEVICE = "bluetooth_device"
 SERVICE_PLAY_MUSIC = "play_music"
+SERVICE_TV_ACTION = "tv_action"
 
 _BT_CMD_MAP = {
     "connect": BT_CMD_CONNECT,
     "disconnect": BT_CMD_DISCONNECT,
     "remove": BT_CMD_REMOVE,
+}
+TV_ACTION_LINKS = {
+    "show_inputs": "livetv://hdmi",
+    "next_input": "action://sberdevices.intent.action.TV_INPUT",
+    "channel_up": "action://sberdevices.intent.action.CHANNEL_NEXT",
+    "channel_down": "action://sberdevices.intent.action.CHANNEL_PREVIEW",
+    "settings": "sberdevices_app_v2://settings",
 }
 
 # device_id добавляет HA-таргетинг (`target:` в services.yaml) — сервис может
@@ -58,6 +67,12 @@ SCHEMA_PLAY_MUSIC = vol.Schema(
         vol.Optional("kind"): vol.In(
             ["track", "artist", "release", "playlist", "podcast", "abook"]
         ),
+    }
+)
+SCHEMA_TV_ACTION = vol.Schema(
+    {
+        vol.Required("device_id"): str,
+        vol.Required("command"): vol.In(sorted(TV_ACTION_LINKS)),
     }
 )
 
@@ -178,6 +193,40 @@ async def _handle_play_music(hass: HomeAssistant, call: ServiceCall) -> None:
             recorded = True
 
 
+async def _handle_tv_action(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Отправить действие одному сопряжённому телевизору."""
+    if not call.data.get("device_id", "").strip():
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="tv_device_required")
+    coords = _coords_from_call(hass, call)
+    if len(coords) != 1:
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="tv_device_required")
+
+    coord = coords[0]
+    if not coord.entry.options.get(OPT_ENABLE_TV_CONTROLS, False):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="tv_controls_disabled"
+        )
+    client = coord.client
+    if not client.pin_access_token:
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="tv_not_paired")
+
+    deeplink = TV_ACTION_LINKS[call.data["command"]]
+    try:
+        result = await send_server_action(client, "DEEPLINK", {"deeplink": deeplink})
+    except TimeoutError as exc:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="tv_action_timeout"
+        ) from exc
+    except (OSError, RuntimeError, ConnectionClosed) as exc:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="tv_connection_unavailable"
+        ) from exc
+
+    description = result.get(1) if isinstance(result, dict) else result
+    if not isinstance(description, str) or description.strip() != "OK":
+        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="tv_action_unconfirmed")
+
+
 def async_register_services(hass: HomeAssistant) -> None:
     """Регистрация служб (однократно, из async_setup)."""
     if hass.services.has_service(DOMAIN, SERVICE_REFRESH_METADATA):
@@ -195,6 +244,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _play_music_handler(call: ServiceCall) -> None:
         await _handle_play_music(hass, call)
 
+    async def _tv_action_handler(call: ServiceCall) -> None:
+        await _handle_tv_action(hass, call)
+
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH_METADATA, _refresh_handler, schema=SCHEMA_REFRESH_METADATA
     )
@@ -206,4 +258,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_PLAY_MUSIC, _play_music_handler, schema=SCHEMA_PLAY_MUSIC
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_TV_ACTION, _tv_action_handler, schema=SCHEMA_TV_ACTION
     )

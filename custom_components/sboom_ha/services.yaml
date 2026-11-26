@@ -76,3 +76,23 @@ play_music:
             - playlist
             - podcast
             - abook
+
+tv_action:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: sboom_ha
+          multiple: false
+    command:
+      required: true
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - show_inputs
+            - next_input
+            - channel_up
+            - channel_down
+            - settings

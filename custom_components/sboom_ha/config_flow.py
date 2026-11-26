@@ -54,6 +54,7 @@ from .const import (
     MDNS_PROP_NAME,
     MDNS_PROP_TYPE,
     OPT_AVAILABILITY_THRESHOLD,
+    OPT_ENABLE_TV_CONTROLS,
     OPT_KARAOKE_FILL,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
@@ -148,6 +149,10 @@ class SboomOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         OPT_PANEL_ENABLED,
                         default=opts.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED),
+                    ): bool,
+                    vol.Optional(
+                        OPT_ENABLE_TV_CONTROLS,
+                        default=opts.get(OPT_ENABLE_TV_CONTROLS, False),
                     ): bool,
                 }
             ),

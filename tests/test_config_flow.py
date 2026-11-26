@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+import pytest
+
 from tests._ha_stubs import (
     AbortFlow,
     ConfigEntry,
@@ -37,6 +39,21 @@ from sboom_ha.const import (  # noqa: E402
     DEFAULT_PORT,
     DOMAIN,
 )
+
+
+@pytest.mark.parametrize(("options", "expected"), [({}, False), ({"enable_tv_controls": True}, True)])
+async def test_tv_controls_option_defaults_off_and_preserves_saved_value(options, expected):
+    flow = cf.SboomOptionsFlow()
+    flow.config_entry = ConfigEntry(options=options)
+
+    form = await flow.async_step_init()
+    submitted = form["data_schema"]({})
+    assert submitted["enable_tv_controls"] is expected
+
+    submitted["enable_tv_controls"] = True
+    result = await flow.async_step_init(submitted)
+    assert result["data"]["enable_tv_controls"] is True
+
 
 # ───────────────────────── helpers ─────────────────────────
 

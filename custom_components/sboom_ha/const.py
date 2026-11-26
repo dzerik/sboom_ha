@@ -150,6 +150,7 @@ OPT_LYRICS_OFFSET = "lyrics_offset"                    # сек, сдвиг ли
 OPT_LYRICS_NETEASE = "lyrics_netease_fallback"         # bool: NetEase как резерв, default True
 OPT_KARAOKE_FILL = "karaoke_fill"                      # bool: посимвольная закраска строки, default False
 OPT_PANEL_ENABLED = "panel_enabled"                    # bool: встроенная панель плеера в боковом меню, default True
+OPT_ENABLE_TV_CONTROLS = "enable_tv_controls"          # bool, default False
 
 # Караоке-стрим: интервал кадров при активном воспроизведении (5 FPS —
 # достижимо после кэширования blur-фона и шрифтов; JPEG-encode 720p ~10-20 мс).
