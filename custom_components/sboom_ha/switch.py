@@ -1,4 +1,4 @@
-"""Switch-entities: shuffle, mute."""
+"""Переключатели воспроизведения и настроек устройства."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -6,10 +6,13 @@ from dataclasses import dataclass
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import Unauthorized, UnknownUser
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ._entity_base import SboomEntity
+from ._entity_base import SboomEntity, SboomTVControlEntity
+from .const import OPT_ENABLE_TV_CONTROLS
 from .coordinator import SboomCoordinator
 
 # Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
@@ -51,7 +54,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coord: SboomCoordinator = entry.runtime_data
-    async_add_entities(SboomSwitchEntity(coord, entry, d) for d in SWITCHES)
+    entities: list[SwitchEntity] = [SboomSwitchEntity(coord, entry, desc) for desc in SWITCHES]
+    entities.append(SboomTVControlsSwitch(coord, entry))
+    async_add_entities(entities)
 
 
 class SboomSwitchEntity(SboomEntity, SwitchEntity):
@@ -78,3 +83,45 @@ class SboomSwitchEntity(SboomEntity, SwitchEntity):
             self.entity_description.turn_off_fn(self.coordinator),
             action=f"{self.entity_description.key} off",
         )
+
+
+class SboomTVControlsSwitch(SboomTVControlEntity, SwitchEntity):
+    """Настройка беты для одной записи Home Assistant."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = OPT_ENABLE_TV_CONTROLS
+
+    def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._device_unique_prefix}_{OPT_ENABLE_TV_CONTROLS}"
+
+    @property
+    def available(self) -> bool:
+        """Опция хранится в HA и доступна при отключённом устройстве."""
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        return self._entry.options.get(OPT_ENABLE_TV_CONTROLS, False)
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._async_set_enabled(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._async_set_enabled(False)
+
+    async def _async_set_enabled(self, enabled: bool) -> None:
+        context = self.tv_call_context
+        if context is not None and context.user_id is not None:
+            user = await self.hass.auth.async_get_user(context.user_id)
+            if user is None:
+                raise UnknownUser(context=context)
+            if not user.is_admin:
+                raise Unauthorized(context=context)
+
+        if self.is_on == enabled:
+            return
+        self.hass.config_entries.async_update_entry(
+            self._entry, options={**self._entry.options, OPT_ENABLE_TV_CONTROLS: enabled}
+        )
+        self.async_write_ha_state()

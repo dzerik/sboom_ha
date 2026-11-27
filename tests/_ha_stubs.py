@@ -626,6 +626,12 @@ class DataUpdateCoordinator(_Generic):
 
 
 class CoordinatorEntity(_Generic):
+    _context = None
+    registry_entry = None
+
+    def async_set_context(self, context) -> None:
+        self._context = context
+
     def __init__(self, coordinator) -> None:
         self.coordinator = coordinator
         self.hass = getattr(coordinator, "hass", None)
@@ -700,6 +706,11 @@ class Platform(str, Enum):
 class EntityCategory(str, Enum):
     DIAGNOSTIC = "diagnostic"
     CONFIG = "config"
+
+
+class RegistryEntryDisabler(str, Enum):
+    INTEGRATION = "integration"
+    USER = "user"
 
 
 CONTENT_TYPE_MULTIPART = "multipart/x-mixed-replace; boundary={}"
@@ -784,6 +795,13 @@ class _SourceType(str, Enum):
     GPS = "gps"
     ROUTER = "router"
     BLUETOOTH = "bluetooth"
+
+
+@dataclass(frozen=True, kw_only=True)
+class _EntityDescription:
+    key: str
+    translation_key: str | None = None
+    icon: str | None = None
 
 
 class ButtonEntity:
@@ -908,8 +926,13 @@ def install_stubs() -> None:
     )
     _make_module(
         "homeassistant.helpers.entity_registry",
-        async_get=lambda hass: hass.data["entity_registry"],
+        RegistryEntryDisabler=RegistryEntryDisabler,
+        async_get=lambda hass: hass.data.setdefault("entity_registry", {}),
         async_entries_for_device=lambda registry, device_id, **kwargs: registry[device_id],
+        async_entries_for_config_entry=lambda registry, entry_id: [
+            entity for group in registry.values() for entity in group
+            if entity.config_entry_id == entry_id
+        ],
     )
     _make_module(
         "homeassistant.helpers.update_coordinator",
@@ -1021,9 +1044,17 @@ def install_stubs() -> None:
         SensorStateClass=SensorStateClass,
         SensorDeviceClass=SensorDeviceClass,
     )
-    _make_module("homeassistant.components.button", ButtonEntity=ButtonEntity)
+    _make_module(
+        "homeassistant.components.button",
+        ButtonEntity=ButtonEntity,
+        ButtonEntityDescription=_EntityDescription,
+    )
     _make_module("homeassistant.components.number", NumberEntity=NumberEntity)
-    _make_module("homeassistant.components.switch", SwitchEntity=SwitchEntity)
+    _make_module(
+        "homeassistant.components.switch",
+        SwitchEntity=SwitchEntity,
+        SwitchEntityDescription=_EntityDescription,
+    )
     _make_module("homeassistant.components.select", SelectEntity=SelectEntity)
     _make_module(
         "homeassistant.components.zeroconf",

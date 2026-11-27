@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
+from contextvars import ContextVar
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import Context, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -19,6 +21,8 @@ from .const import (
 )
 from .coordinator import SboomCoordinator
 from .helpers import sber_device_id
+
+_tv_call_context: ContextVar[Context | None] = ContextVar("sboom_tv_call_context", default=None)
 
 
 class SboomEntity(CoordinatorEntity[SboomCoordinator]):
@@ -83,3 +87,18 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
                 translation_key="command_failed",
                 translation_placeholders={"action": action, "error": str(exc)},
             ) from exc
+
+
+class SboomTVControlEntity(SboomEntity):
+    """Сохраняет пользователя вызова, пока HA выполняет команду устройства."""
+
+    @callback
+    def async_set_context(self, context: Context) -> None:
+        super().async_set_context(context)
+        # HA 2024.12 может запустить метод сущности в отдельной задаче.
+        # Следующий вызов той же сущности уже может сменить общий Entity._context.
+        _tv_call_context.set(context)
+
+    @property
+    def tv_call_context(self) -> Context | None:
+        return _tv_call_context.get()

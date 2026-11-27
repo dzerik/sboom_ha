@@ -116,6 +116,21 @@
       },
       "find_remote": {
         "name": "Find remote"
+      },
+      "tv_show_inputs": {
+        "name": "Show inputs"
+      },
+      "tv_next_input": {
+        "name": "Next input"
+      },
+      "tv_channel_up": {
+        "name": "Next channel"
+      },
+      "tv_channel_down": {
+        "name": "Previous channel"
+      },
+      "tv_settings": {
+        "name": "Open settings"
       }
     },
     "number": {
@@ -129,6 +144,9 @@
       },
       "mute": {
         "name": "Mute"
+      },
+      "enable_tv_controls": {
+        "name": "Experimental TV controls"
       }
     },
     "select": {

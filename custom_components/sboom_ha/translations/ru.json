@@ -116,6 +116,21 @@
       },
       "find_remote": {
         "name": "Найти пульт"
+      },
+      "tv_show_inputs": {
+        "name": "Показать список входов"
+      },
+      "tv_next_input": {
+        "name": "Следующий вход"
+      },
+      "tv_channel_up": {
+        "name": "Следующий канал"
+      },
+      "tv_channel_down": {
+        "name": "Предыдущий канал"
+      },
+      "tv_settings": {
+        "name": "Открыть настройки"
       }
     },
     "number": {
@@ -129,6 +144,9 @@
       },
       "mute": {
         "name": "Без звука"
+      },
+      "enable_tv_controls": {
+        "name": "Экспериментальные функции ТВ"
       }
     },
     "select": {
